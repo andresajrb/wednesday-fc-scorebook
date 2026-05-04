@@ -1,0 +1,42 @@
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  html {
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-bg text-text font-sans antialiased;
+    font-feature-settings: 'cv11';
+    overscroll-behavior-y: contain;
+  }
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Hide scrollbar utility */
+  .noscrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .noscrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+}
