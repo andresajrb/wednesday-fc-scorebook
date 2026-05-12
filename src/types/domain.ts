@@ -1,6 +1,8 @@
 export type ID = string;
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
+
+export const DEFAULT_MATCH_DURATION_SECONDS = 7 * 60;
 
 export interface Team {
   id: ID;
@@ -66,6 +68,7 @@ export interface AppConfig {
   onboardingDone: boolean;
   createdAt: string;
   autoAssignNextMatch: boolean;
+  matchDurationSeconds: number;
 }
 
 export interface AppState {

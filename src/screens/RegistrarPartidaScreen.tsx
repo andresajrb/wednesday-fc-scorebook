@@ -8,6 +8,7 @@ import { ConfirmDialog } from '@/components/primitives/ConfirmDialog';
 import { Avatar } from '@/components/primitives/Avatar';
 import { Chip } from '@/components/primitives/Chip';
 import { StickyBottomCTA } from '@/components/primitives/StickyBottomCTA';
+import { MatchClock } from '@/components/domain/MatchClock';
 import { useStore } from '@/store/useStore';
 import {
   getMatchScore,
@@ -34,6 +35,7 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
   const addPlayer = useStore((s) => s.addPlayer);
 
   const autoAssign = useStore((s) => s.state.config.autoAssignNextMatch);
+  const matchDuration = useStore((s) => s.state.config.matchDurationSeconds);
 
   const match = state.matches[matchId];
   const teamA = match ? state.teams[match.teamAId] : undefined;
@@ -191,17 +193,21 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
     navigate({ name: 'jornada-active', jornadaId: match.jornadaId }, { replace: true });
   };
 
-  const fmtElapsed = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`;
-
   return (
     <ScreenShell>
       <header className="sticky top-0 z-30 backdrop-blur-md bg-bg/85 border-b border-border px-4 py-2.5 flex items-center gap-2">
         <IconButton ariaLabel="Volver" onClick={back}>
           <ArrowLeft size={20} strokeWidth={1.75} />
         </IconButton>
-        <div className="flex-1 text-center min-w-0">
-          <div className="text-[15px] font-semibold leading-tight">Partida #{match.order}</div>
-          <div className="text-caption font-mono text-text-2 leading-tight">{fmtElapsed}</div>
+        <div className="flex-1 flex flex-col items-center min-w-0">
+          <div className="text-caption text-text-2 uppercase tracking-wide leading-none mb-1">
+            Partida #{match.order}
+          </div>
+          <MatchClock
+            elapsedSeconds={elapsed}
+            durationSeconds={matchDuration}
+            isRunning={!isClosed}
+          />
         </div>
         <button
           type="button"

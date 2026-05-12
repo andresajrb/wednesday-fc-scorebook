@@ -1,3 +1,4 @@
+import { MoreHorizontal } from 'lucide-react';
 import type { Match, Team } from '@/types/domain';
 import { cn } from '@/lib/cn';
 import { lightenForText } from '@/lib/colors';
@@ -10,6 +11,7 @@ interface MatchCardProps {
   goalsB: number;
   scorersText?: string;
   onClick?: () => void;
+  onMore?: () => void;
 }
 
 export function MatchCard({
@@ -20,6 +22,7 @@ export function MatchCard({
   goalsB,
   scorersText,
   onClick,
+  onMore,
 }: MatchCardProps) {
   const winner = match.result;
   const isDraw = winner === 'draw';
@@ -36,21 +39,48 @@ export function MatchCard({
         : 'En curso';
 
   return (
-    <button
-      type="button"
+    <div
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
       onClick={onClick}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
       className={cn(
-        'w-full text-left bg-bg-elev border border-border rounded-card p-3.5 active:bg-bg-elev2 transition relative'
+        'w-full text-left bg-bg-elev border border-border rounded-card p-3.5 transition relative',
+        onClick && 'cursor-pointer active:bg-bg-elev2'
       )}
     >
       <div className="flex items-center justify-between mb-2">
         <span className="text-caption text-text-3 uppercase tracking-wide">#{match.order}</span>
-        {live && (
-          <span className="inline-flex items-center gap-1.5 text-caption text-accent">
-            <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse-dot" />
-            En curso
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {live && (
+            <span className="inline-flex items-center gap-1.5 text-caption text-accent">
+              <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse-dot" />
+              En curso
+            </span>
+          )}
+          {onMore && (
+            <button
+              type="button"
+              aria-label="Más opciones"
+              onClick={(e) => {
+                e.stopPropagation();
+                onMore();
+              }}
+              className="inline-flex items-center justify-center w-8 h-8 rounded-md text-text-2 active:bg-bg-elev2 -mr-1 -my-1"
+            >
+              <MoreHorizontal size={18} strokeWidth={1.75} />
+            </button>
+          )}
+        </div>
       </div>
       <div className="flex items-center gap-3">
         <div className={cn('flex-1 min-w-0', dimA && 'opacity-45')}>
@@ -95,6 +125,6 @@ export function MatchCard({
         <span className="text-caption text-text-2 truncate">{scorersText || '—'}</span>
         <span className="text-caption text-text-2 flex-shrink-0">{winnerLabel}</span>
       </div>
-    </button>
+    </div>
   );
 }

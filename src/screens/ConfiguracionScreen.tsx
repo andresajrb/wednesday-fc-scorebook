@@ -19,8 +19,22 @@ export function ConfiguracionScreen() {
   const renameTeam = useStore((s) => s.renameTeam);
   const setTeamColor = useStore((s) => s.setTeamColor);
   const setAutoAssignNextMatch = useStore((s) => s.setAutoAssignNextMatch);
+  const setMatchDurationSeconds = useStore((s) => s.setMatchDurationSeconds);
   const replaceState = useStore((s) => s.replaceState);
   const resetAll = useStore((s) => s.resetAll);
+
+  const durationMinutes = Math.round(state.config.matchDurationSeconds / 60);
+  const [durationInput, setDurationInput] = useState(String(durationMinutes));
+  const commitDuration = () => {
+    const n = parseInt(durationInput, 10);
+    if (!Number.isFinite(n) || n < 1) {
+      setDurationInput(String(durationMinutes));
+      return;
+    }
+    const clamped = Math.min(90, Math.max(1, n));
+    setMatchDurationSeconds(clamped * 60);
+    setDurationInput(String(clamped));
+  };
 
   const [colorPicker, setColorPicker] = useState<string | null>(null);
   const [importBackup, setImportBackup] = useState<{ message: string; data: typeof state } | null>(
@@ -108,19 +122,45 @@ export function ConfiguracionScreen() {
           <div className="text-caption uppercase tracking-wider text-text-2 font-semibold mb-2">
             Reglas
           </div>
-          <div className="bg-bg-elev border border-border rounded-card p-3 flex items-start gap-3">
-            <div className="flex-1 min-w-0">
-              <div className="text-body-em font-semibold">Asignación automática de encuentros</div>
-              <div className="text-caption text-text-2 mt-1 leading-relaxed">
-                La app predice el próximo enfrentamiento siguiendo la regla "el que pierde sale". Después
-                de algunas partidas conoce el orden de la cola.
+          <div className="bg-bg-elev border border-border rounded-card overflow-hidden">
+            <div className="p-3 flex items-start gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="text-body-em font-semibold">Asignación automática de encuentros</div>
+                <div className="text-caption text-text-2 mt-1 leading-relaxed">
+                  La app predice el próximo enfrentamiento siguiendo la regla "el que pierde sale".
+                  Usa los últimos 3 partidos para mantenerse fresca.
+                </div>
+              </div>
+              <ToggleSwitch
+                checked={state.config.autoAssignNextMatch}
+                onChange={(v) => setAutoAssignNextMatch(v)}
+                ariaLabel="Activar asignación automática"
+              />
+            </div>
+            <div className="p-3 border-t border-border flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="text-body-em font-semibold">Duración de partida</div>
+                <div className="text-caption text-text-2 mt-1">Minutos por partida (1–90).</div>
+              </div>
+              <div className="flex items-center gap-1">
+                <input
+                  data-field="duration"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={90}
+                  value={durationInput}
+                  onChange={(e) => setDurationInput(e.target.value)}
+                  onBlur={commitDuration}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  }}
+                  className="w-16 h-11 text-center bg-bg-elev2 border border-border rounded-btn outline-none focus:border-accent font-mono text-body-em font-semibold"
+                  aria-label="Duración en minutos"
+                />
+                <span className="text-caption text-text-2">min</span>
               </div>
             </div>
-            <ToggleSwitch
-              checked={state.config.autoAssignNextMatch}
-              onChange={(v) => setAutoAssignNextMatch(v)}
-              ariaLabel="Activar asignación automática"
-            />
           </div>
         </section>
 

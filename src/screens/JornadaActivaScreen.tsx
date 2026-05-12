@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, Plus, Sparkles, Pencil } from 'lucide-react';
+import { ArrowLeft, Plus, Sparkles, Pencil, Trash2 } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { Header } from '@/components/primitives/Header';
 import { IconButton } from '@/components/primitives/IconButton';
@@ -39,6 +39,7 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
   const inProgress = matches.find((m) => m.result === null);
 
   const autoAssign = useStore((s) => s.state.config.autoAssignNextMatch);
+  const reopenMatch = useStore((s) => s.reopenMatch);
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [predictionOpen, setPredictionOpen] = useState(false);
@@ -46,6 +47,10 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
   const [teamB, setTeamB] = useState<ID | null>(null);
   const [closeOpen, setCloseOpen] = useState(false);
   const [closeWithInProgressOpen, setCloseWithInProgressOpen] = useState(false);
+  const [matchMenuId, setMatchMenuId] = useState<ID | null>(null);
+  const [confirmDeleteMatchId, setConfirmDeleteMatchId] = useState<ID | null>(null);
+
+  const menuMatch = matchMenuId ? state.matches[matchMenuId] : null;
 
   const prediction = jornada ? predictNextMatch(state, jornadaId) : null;
 
@@ -196,9 +201,14 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
                 goalsA={goalsA}
                 goalsB={goalsB}
                 scorersText={scorers.join(', ')}
-                onClick={() => {
-                  if (m.result === null) navigate({ name: 'match-record', matchId: m.id });
-                }}
+                onClick={
+                  m.result === null
+                    ? () => navigate({ name: 'match-record', matchId: m.id })
+                    : !closed
+                      ? () => setMatchMenuId(m.id)
+                      : undefined
+                }
+                onMore={!closed && m.result !== null ? () => setMatchMenuId(m.id) : undefined}
               />
             );
           })
@@ -339,6 +349,57 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
           </div>
         )}
       </BottomSheet>
+
+      <BottomSheet
+        open={!!menuMatch}
+        onClose={() => setMatchMenuId(null)}
+        title={menuMatch ? `Partida #${menuMatch.order}` : ''}
+      >
+        {menuMatch && (
+          <div className="flex flex-col">
+            <button
+              type="button"
+              onClick={() => {
+                reopenMatch(menuMatch.id);
+                setMatchMenuId(null);
+                navigate({ name: 'match-record', matchId: menuMatch.id });
+              }}
+              className="flex items-center gap-3 px-2 py-3 active:bg-bg-elev rounded-md text-left"
+            >
+              <span className="w-9 h-9 rounded-md bg-bg-elev2 flex items-center justify-center flex-shrink-0">
+                <Pencil size={18} strokeWidth={1.75} />
+              </span>
+              <span className="text-body-em font-medium">Editar partida</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmDeleteMatchId(menuMatch.id);
+                setMatchMenuId(null);
+              }}
+              className="flex items-center gap-3 px-2 py-3 active:bg-bg-elev rounded-md text-left text-error"
+            >
+              <span className="w-9 h-9 rounded-md bg-bg-elev2 flex items-center justify-center flex-shrink-0">
+                <Trash2 size={18} strokeWidth={1.75} />
+              </span>
+              <span className="text-body-em font-medium">Eliminar partida</span>
+            </button>
+          </div>
+        )}
+      </BottomSheet>
+
+      <ConfirmDialog
+        open={!!confirmDeleteMatchId}
+        title="Eliminar partida"
+        description="Se borrará la partida y sus goles. Esta acción no se puede deshacer."
+        confirmLabel="Eliminar"
+        danger
+        onConfirm={() => {
+          if (confirmDeleteMatchId) cancelMatch(confirmDeleteMatchId);
+          setConfirmDeleteMatchId(null);
+        }}
+        onCancel={() => setConfirmDeleteMatchId(null)}
+      />
 
       <ConfirmDialog
         open={closeOpen}

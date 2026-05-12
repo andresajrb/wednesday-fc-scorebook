@@ -187,30 +187,37 @@ export interface NextMatchPrediction {
   certain: boolean;
 }
 
+export const PREDICTION_WINDOW = 3;
+
 /**
- * Predice cuál es el siguiente enfrentamiento siguiendo las reglas del juego:
+ * Predice cuál es el siguiente enfrentamiento siguiendo las reglas del juego.
+ * Usa solo los últimos `PREDICTION_WINDOW` matches terminados como ventana
+ * deslizante, así errores antiguos en la cola no contaminan futuras predicciones.
+ *
  * - El que pierde sale al final de la cola; el ganador se queda y entra el siguiente.
  * - Empate: ambos salen al final de la cola (con `drawWinnerNext` definiendo cuál
  *   entrará antes), y entran los 2 primeros de la cola previa.
  *
- * Modelo de cola lógica = `unseen` (equipos que aún no han jugado, frente)
- * concatenado con `queue` (equipos que ya jugaron y volvieron a esperar, fondo).
- *
- * Durante la simulación de matches pasados, mira el match siguiente para
- * descubrir cuál equipo de `unseen` entró (revelando su orden).
+ * Modelo de cola lógica = `unseen` (equipos que aún no han jugado en la ventana,
+ * frente) concatenado con `queue` (equipos que ya jugaron y volvieron a esperar,
+ * fondo). Durante la simulación, mira el match siguiente para descubrir cuál
+ * equipo de `unseen` entró (revelando su orden).
  *
  * Devuelve null si:
  * - No hay partidas terminadas (no hay info).
- * - Quedan ≥2 equipos sin jugar todavía y se necesitan para llenar el próximo match.
+ * - Quedan ≥2 equipos sin jugar dentro de la ventana y se necesitan para llenar
+ *   el próximo match.
  */
 export function predictNextMatch(
   state: AppState,
   jornadaId: ID
 ): NextMatchPrediction | null {
-  const matches = getMatchesForJornada(state, jornadaId)
+  const allFinished = getMatchesForJornada(state, jornadaId)
     .filter((m) => m.endedAt && m.result !== null)
     .sort((a, b) => a.order - b.order);
-  if (matches.length === 0) return null;
+  if (allFinished.length === 0) return null;
+  // Ventana deslizante: solo los últimos N matches.
+  const matches = allFinished.slice(-PREDICTION_WINDOW);
 
   const allTeamIds = Object.values(state.teams).map((t) => t.id);
   const initialOnCourt = [matches[0].teamAId, matches[0].teamBId];

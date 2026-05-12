@@ -34,3 +34,6 @@ test-results
 
 # docs (not part of source)
 docs
+
+# claude code local config
+.claude

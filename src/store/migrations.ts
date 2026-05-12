@@ -1,4 +1,4 @@
-import { SCHEMA_VERSION, type AppState } from '@/types/domain';
+import { DEFAULT_MATCH_DURATION_SECONDS, SCHEMA_VERSION, type AppState } from '@/types/domain';
 
 type MigrationFn = (data: unknown) => unknown;
 
@@ -10,6 +10,16 @@ const migrations: Record<number, MigrationFn> = {
       config: {
         ...(d.config ?? {}),
         autoAssignNextMatch: d.config?.autoAssignNextMatch ?? false,
+      },
+    };
+  },
+  3: (data) => {
+    const d = data as { config?: { matchDurationSeconds?: number } } & Record<string, unknown>;
+    return {
+      ...d,
+      config: {
+        ...(d.config ?? {}),
+        matchDurationSeconds: d.config?.matchDurationSeconds ?? DEFAULT_MATCH_DURATION_SECONDS,
       },
     };
   },

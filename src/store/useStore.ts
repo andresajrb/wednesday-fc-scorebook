@@ -8,7 +8,7 @@ import type {
   Screen,
   Team,
 } from '@/types/domain';
-import { SCHEMA_VERSION } from '@/types/domain';
+import { DEFAULT_MATCH_DURATION_SECONDS, SCHEMA_VERSION } from '@/types/domain';
 import { localforageStorage, clearStorage } from './persistence';
 import { migrateAppState } from './migrations';
 import { todayISODate } from '@/lib/format';
@@ -68,6 +68,10 @@ interface StoreActions {
 
   // Settings
   setAutoAssignNextMatch(value: boolean): void;
+  setMatchDurationSeconds(value: number): void;
+
+  // Edit
+  reopenMatch(matchId: ID): void;
 
   // Backup / reset
   replaceState(next: AppState): void;
@@ -93,6 +97,7 @@ function makeInitialState(): AppState {
       onboardingDone: false,
       createdAt: nowISO(),
       autoAssignNextMatch: false,
+      matchDurationSeconds: DEFAULT_MATCH_DURATION_SECONDS,
     },
   };
 }
@@ -368,6 +373,35 @@ export const useStore = create<Store>()(
             config: { ...s.state.config, autoAssignNextMatch: value },
           },
         })),
+
+      setMatchDurationSeconds: (value) =>
+        set((s) => ({
+          state: {
+            ...s.state,
+            config: {
+              ...s.state.config,
+              matchDurationSeconds: Math.max(30, Math.round(value)),
+            },
+          },
+        })),
+
+      reopenMatch: (matchId) =>
+        set((s) => {
+          const m = s.state.matches[matchId];
+          if (!m) return s;
+          const { endedAt: _endedAt, drawWinnerNext: _drawWinnerNext, ...rest } = m;
+          void _endedAt;
+          void _drawWinnerNext;
+          return {
+            state: {
+              ...s.state,
+              matches: {
+                ...s.state.matches,
+                [matchId]: { ...rest, result: null },
+              },
+            },
+          };
+        }),
 
       replaceState: (next) =>
         set(() => ({
