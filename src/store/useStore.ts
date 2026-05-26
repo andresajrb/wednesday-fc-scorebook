@@ -9,7 +9,14 @@ import type {
   Team,
 } from '@/types/domain';
 import { DEFAULT_MATCH_DURATION_SECONDS, SCHEMA_VERSION } from '@/types/domain';
-import { localforageStorage, clearStorage } from './persistence';
+import {
+  localforageStorage,
+  clearStorage,
+  consumeHydrationError,
+  reportHydrationError,
+  subscribeHydrationError,
+  type HydrateError,
+} from './persistence';
 import { migrateAppState } from './migrations';
 import { todayISODate } from '@/lib/format';
 
@@ -30,6 +37,7 @@ interface StoreData {
     currentScreen: Screen;
     history: NavStackEntry[];
   };
+  hydrateError: HydrateError | null;
 }
 
 interface StoreActions {
@@ -77,6 +85,10 @@ interface StoreActions {
   replaceState(next: AppState): void;
   resetAll(): Promise<void>;
 
+  // Hydration
+  setHydrateError(err: HydrateError | null): void;
+  clearHydrateError(): void;
+
   // Navigation
   navigate(screen: Screen, opts?: { replace?: boolean }): void;
   back(): void;
@@ -114,6 +126,10 @@ export const useStore = create<Store>()(
     (set, get) => ({
       state: initialState,
       ui: makeInitialUI(initialState),
+      hydrateError: null,
+
+      setHydrateError: (err) => set(() => ({ hydrateError: err })),
+      clearHydrateError: () => set(() => ({ hydrateError: null })),
 
       completeOnboarding: (teamsInput) =>
         set((s) => {
@@ -465,12 +481,28 @@ export const useStore = create<Store>()(
       partialize: (s) => ({ state: s.state, ui: s.ui }),
       migrate: (persistedState) => {
         if (!persistedState) return persistedState;
-        const ps = persistedState as { state?: AppState };
-        if (ps.state) {
-          ps.state = migrateAppState(ps.state);
+        try {
+          const ps = persistedState as { state?: AppState };
+          if (ps.state) {
+            ps.state = migrateAppState(ps.state);
+          }
+          return ps;
+        } catch (err) {
+          reportHydrationError({ kind: 'migration', message: String(err) });
+          return persistedState;
         }
-        return ps;
       },
     }
   )
 );
+
+// Si el storage detectó JSON corrupto o migración fallida durante el hidratado,
+// hacemos visible el error al primer render via el flag del store.
+// Suscripción al evento de error (puede llegar después del create por ser async).
+subscribeHydrationError((err) => {
+  useStore.setState({ hydrateError: err });
+});
+const initialHydrationError = consumeHydrationError();
+if (initialHydrationError) {
+  useStore.setState({ hydrateError: initialHydrationError });
+}
