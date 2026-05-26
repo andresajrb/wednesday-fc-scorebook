@@ -49,6 +49,7 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
   const [closeWithInProgressOpen, setCloseWithInProgressOpen] = useState(false);
   const [matchMenuId, setMatchMenuId] = useState<ID | null>(null);
   const [confirmDeleteMatchId, setConfirmDeleteMatchId] = useState<ID | null>(null);
+  const [confirmReopenMatchId, setConfirmReopenMatchId] = useState<ID | null>(null);
 
   const menuMatch = matchMenuId ? state.matches[matchMenuId] : null;
 
@@ -360,9 +361,8 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
             <button
               type="button"
               onClick={() => {
-                reopenMatch(menuMatch.id);
+                setConfirmReopenMatchId(menuMatch.id);
                 setMatchMenuId(null);
-                navigate({ name: 'match-record', matchId: menuMatch.id });
               }}
               className="flex items-center gap-3 px-2 py-3 active:bg-bg-elev rounded-md text-left"
             >
@@ -399,6 +399,25 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
           setConfirmDeleteMatchId(null);
         }}
         onCancel={() => setConfirmDeleteMatchId(null)}
+      />
+
+      <ConfirmDialog
+        open={!!confirmReopenMatchId}
+        title="Reabrir partida"
+        description="Se borrará el resultado y los puntos se recalcularán al finalizar de nuevo. ¿Continuar?"
+        confirmLabel="Reabrir"
+        danger
+        onConfirm={() => {
+          if (confirmReopenMatchId) {
+            const id = confirmReopenMatchId;
+            reopenMatch(id);
+            setConfirmReopenMatchId(null);
+            navigate({ name: 'match-record', matchId: id });
+          } else {
+            setConfirmReopenMatchId(null);
+          }
+        }}
+        onCancel={() => setConfirmReopenMatchId(null)}
       />
 
       <ConfirmDialog
