@@ -1,6 +1,6 @@
 export type ID = string;
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const DEFAULT_MATCH_DURATION_SECONDS = 7 * 60;
 
@@ -39,7 +39,13 @@ export interface Match {
   drawWinnerNext?: ID;
   rosterA: MatchRosterEntry[];
   rosterB: MatchRosterEntry[];
+  /** Cuándo se creó el match (los equipos quedaron elegidos). */
   startedAt: string;
+  /**
+   * Cuándo arrancó efectivamente el cronómetro. Si está vacío, el cronómetro no se inició
+   * (el usuario aún no tocó "Listo, empezar"). Se llena al tocar el botón.
+   */
+  clockStartedAt?: string;
   endedAt?: string;
 }
 

@@ -429,16 +429,45 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
         onCancel={() => setCloseOpen(false)}
       />
 
-      <ConfirmDialog
+      <BottomSheet
         open={closeWithInProgressOpen}
+        onClose={() => setCloseWithInProgressOpen(false)}
         title="Hay una partida sin terminar"
-        description="¿Quieres descartarla y cerrar la jornada de todas formas?"
-        confirmLabel="Descartar y cerrar"
-        cancelLabel="Volver"
-        danger
-        onConfirm={discardAndClose}
-        onCancel={() => setCloseWithInProgressOpen(false)}
-      />
+      >
+        <p className="text-body text-text-2 mb-4 leading-relaxed">
+          Tenés una partida en curso. Podés ir a finalizarla, o descartarla y cerrar la jornada.
+        </p>
+        <div className="flex flex-col gap-2">
+          <Button
+            size="lg"
+            fullWidth
+            onClick={() => {
+              if (inProgress) {
+                setCloseWithInProgressOpen(false);
+                navigate({ name: 'match-record', matchId: inProgress.id });
+              }
+            }}
+          >
+            Ir a la partida
+          </Button>
+          <Button
+            size="lg"
+            variant="danger"
+            fullWidth
+            onClick={discardAndClose}
+          >
+            Descartar y cerrar
+          </Button>
+          <Button
+            size="lg"
+            variant="ghost"
+            fullWidth
+            onClick={() => setCloseWithInProgressOpen(false)}
+          >
+            Volver
+          </Button>
+        </div>
+      </BottomSheet>
 
     </ScreenShell>
   );

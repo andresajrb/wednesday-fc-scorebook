@@ -7,13 +7,18 @@ interface BottomSheetProps {
   title?: ReactNode;
   children: ReactNode;
   className?: string;
+  /**
+   * Si es false, no se puede cerrar el sheet con backdrop ni con Escape.
+   * Útil para sheets bloqueantes que requieren elegir una opción. Default: true.
+   */
+  dismissable?: boolean;
 }
 
-export function BottomSheet({ open, onClose, title, children, className }: BottomSheetProps) {
+export function BottomSheet({ open, onClose, title, children, className, dismissable = true }: BottomSheetProps) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && dismissable) onClose();
     };
     document.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
@@ -21,18 +26,22 @@ export function BottomSheet({ open, onClose, title, children, className }: Botto
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
     };
-  }, [open, onClose]);
+  }, [open, onClose, dismissable]);
 
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end" role="dialog" aria-modal="true">
-      <button
-        className="absolute inset-0 bg-black/60 animate-fade-in"
-        onClick={onClose}
-        aria-label="Cerrar"
-        tabIndex={-1}
-      />
+      {dismissable ? (
+        <button
+          className="absolute inset-0 bg-black/60 animate-fade-in"
+          onClick={onClose}
+          aria-label="Cerrar"
+          tabIndex={-1}
+        />
+      ) : (
+        <div className="absolute inset-0 bg-black/60 animate-fade-in" aria-hidden="true" />
+      )}
       <div
         className={cn(
           'relative bg-bg-sheet rounded-t-sheet px-4 pt-3 pb-8 border-t border-border max-h-[85%] overflow-auto noscrollbar animate-sheet-up',
@@ -40,7 +49,7 @@ export function BottomSheet({ open, onClose, title, children, className }: Botto
         )}
         style={{ paddingBottom: 'max(2rem, env(safe-area-inset-bottom))' }}
       >
-        <div className="w-9 h-1 bg-white/20 rounded mx-auto mb-3" />
+        {dismissable && <div className="w-9 h-1 bg-white/20 rounded mx-auto mb-3" />}
         {title && <div className="text-body-em font-semibold mb-3">{title}</div>}
         {children}
       </div>

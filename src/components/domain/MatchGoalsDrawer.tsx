@@ -38,6 +38,8 @@ export function MatchGoalsDrawer({
   const orderedDesc = [...goals].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
+  // El minuto del gol se calcula desde el arranque del reloj. Si no está, fallback a startedAt.
+  const clockStart = match.clockStartedAt ?? match.startedAt;
 
   return (
     <BottomSheet open={open} onClose={onClose} title="Historial de goles">
@@ -51,7 +53,7 @@ export function MatchGoalsDrawer({
             const isTeamA = goal.scoringForTeamId === teamA.id;
             const team = isTeamA ? teamA : teamB;
             const player = goal.playerId ? players[goal.playerId] : undefined;
-            const minute = formatMatchTime(goal.createdAt, match.startedAt);
+            const minute = formatMatchTime(goal.createdAt, clockStart);
             return (
               <li key={goal.id} className="flex items-center gap-2 py-2 border-b border-border last:border-0">
                 <span className="text-caption text-text-3 font-mono tnum w-12 flex-shrink-0">

@@ -64,6 +64,7 @@ interface StoreActions {
   addToRoster(matchId: ID, side: 'A' | 'B', entry: MatchRosterEntry): void;
   finishMatch(matchId: ID, drawWinnerNext?: ID): void;
   cancelMatch(matchId: ID): void;
+  startMatchClock(matchId: ID): void;
 
   // Goals
   addGoal(
@@ -356,6 +357,21 @@ export const useStore = create<Store>()(
             if (g.matchId !== matchId) newGoals[gid] = g;
           }
           return { state: { ...s.state, matches: newMatches, goals: newGoals } };
+        }),
+
+      startMatchClock: (matchId) =>
+        set((s) => {
+          const m = s.state.matches[matchId];
+          if (!m || m.clockStartedAt) return s;
+          return {
+            state: {
+              ...s.state,
+              matches: {
+                ...s.state.matches,
+                [matchId]: { ...m, clockStartedAt: nowISO() },
+              },
+            },
+          };
         }),
 
       addGoal: (matchId, playerId, scoringForTeamId, isLoaned) => {

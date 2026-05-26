@@ -23,6 +23,26 @@ const migrations: Record<number, MigrationFn> = {
       },
     };
   },
+  4: (data) => {
+    // Para los matches que existen en v3, el reloj ya estaba corriendo desde startedAt
+    // (no había botón "Listo, empezar"). Copiamos startedAt en clockStartedAt para que
+    // sigan funcionando igual.
+    const d = data as {
+      matches?: Record<string, { startedAt?: string; clockStartedAt?: string }>;
+    } & Record<string, unknown>;
+    const matches = d.matches ?? {};
+    const migratedMatches: Record<string, unknown> = {};
+    for (const [id, m] of Object.entries(matches)) {
+      migratedMatches[id] = {
+        ...m,
+        clockStartedAt: m.clockStartedAt ?? m.startedAt,
+      };
+    }
+    return {
+      ...d,
+      matches: migratedMatches,
+    };
+  },
 };
 
 export function migrate(data: unknown, fromVersion: number, toVersion: number): unknown {

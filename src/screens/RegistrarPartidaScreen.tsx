@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ListOrdered, Flag, UserPlus, Trophy, Plus, Check, ShieldPlus } from 'lucide-react';
+import { ArrowLeft, ListOrdered, Flag, UserPlus, Trophy, Plus, Check, ShieldPlus, Play } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { IconButton } from '@/components/primitives/IconButton';
 import { Button } from '@/components/primitives/Button';
@@ -36,6 +36,7 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
   const cancelMatch = useStore((s) => s.cancelMatch);
   const addToRoster = useStore((s) => s.addToRoster);
   const addPlayer = useStore((s) => s.addPlayer);
+  const startMatchClock = useStore((s) => s.startMatchClock);
 
   const autoAssign = useStore((s) => s.state.config.autoAssignNextMatch);
   const matchDuration = useStore((s) => s.state.config.matchDurationSeconds);
@@ -63,10 +64,10 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
   const [goalsDrawerOpen, setGoalsDrawerOpen] = useState(false);
   const [reassignGoalId, setReassignGoalId] = useState<ID | null>(null);
 
-  // Timer
+  // Timer — solo corre si el reloj fue iniciado explícitamente (clockStartedAt set).
   useEffect(() => {
-    if (!match || match.endedAt) return;
-    const start = new Date(match.startedAt).getTime();
+    if (!match || match.endedAt || !match.clockStartedAt) return;
+    const start = new Date(match.clockStartedAt).getTime();
     const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)));
     tick();
     const id = window.setInterval(tick, 1000);
@@ -106,6 +107,7 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
   const isClosed = match.endedAt;
   const isFirst = match.type === 'first';
   const goalLimit = match.goalLimit;
+  const clockNotStarted = !match.clockStartedAt && !isClosed;
   const limitHit =
     !isClosed && (score.goalsA >= goalLimit || score.goalsB >= goalLimit) && score.goalsA !== score.goalsB;
   // Reset del override cuando el límite ya no aplica (ej: tras deshacer goles o reabrir match).
@@ -284,58 +286,73 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
         )}
       </div>
 
-      {/* Rosters */}
-      <div className="grid grid-cols-2 flex-1 min-h-0 overflow-auto">
-        <RosterColumn
-          side="A"
-          color={teamA.color}
-          teamName={teamA.name}
-          players={teamAPlayers}
-          goalsByPlayer={goalsByPlayer}
-          onAddGoal={(playerId, borrowed) => onAddGoal('A', playerId, borrowed)}
-          onAddTeamGoal={() => onAddGoal('A', null)}
-          onBorrow={() => setBorrowFor('A')}
-          onStartAddPlayer={() => {
-            setNewPlayerName('');
-            setAddingPlayerSide('A');
-          }}
-          isAddingPlayer={addingPlayerSide === 'A'}
-          newPlayerName={newPlayerName}
-          onNewPlayerNameChange={setNewPlayerName}
-          onCancelAddPlayer={() => {
-            setAddingPlayerSide(null);
-            setNewPlayerName('');
-          }}
-          onConfirmAddPlayer={onAddPlayerInMatch}
-          dividerRight
-          getPlayerTeam={(teamId) => state.teams[teamId]?.name ?? ''}
-          isClosed={!!isClosed}
-        />
-        <RosterColumn
-          side="B"
-          color={teamB.color}
-          teamName={teamB.name}
-          players={teamBPlayers}
-          goalsByPlayer={goalsByPlayer}
-          onAddGoal={(playerId, borrowed) => onAddGoal('B', playerId, borrowed)}
-          onAddTeamGoal={() => onAddGoal('B', null)}
-          onBorrow={() => setBorrowFor('B')}
-          onStartAddPlayer={() => {
-            setNewPlayerName('');
-            setAddingPlayerSide('B');
-          }}
-          isAddingPlayer={addingPlayerSide === 'B'}
-          newPlayerName={newPlayerName}
-          onNewPlayerNameChange={setNewPlayerName}
-          onCancelAddPlayer={() => {
-            setAddingPlayerSide(null);
-            setNewPlayerName('');
-          }}
-          onConfirmAddPlayer={onAddPlayerInMatch}
-          getPlayerTeam={(teamId) => state.teams[teamId]?.name ?? ''}
-          isClosed={!!isClosed}
-        />
-      </div>
+      {/* Rosters o "Listo, empezar" mientras el cronómetro no arrancó */}
+      {clockNotStarted ? (
+        <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-6 py-8 gap-5 text-center">
+          <p className="text-body text-text-2 leading-relaxed max-w-sm">
+            Cuando los equipos estén ubicados en cancha, tocá el botón para arrancar el cronómetro.
+          </p>
+          <Button
+            size="xl"
+            leading={<Play size={20} strokeWidth={1.75} />}
+            onClick={() => startMatchClock(match.id)}
+          >
+            Listo, empezar
+          </Button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 flex-1 min-h-0 overflow-auto">
+          <RosterColumn
+            side="A"
+            color={teamA.color}
+            teamName={teamA.name}
+            players={teamAPlayers}
+            goalsByPlayer={goalsByPlayer}
+            onAddGoal={(playerId, borrowed) => onAddGoal('A', playerId, borrowed)}
+            onAddTeamGoal={() => onAddGoal('A', null)}
+            onBorrow={() => setBorrowFor('A')}
+            onStartAddPlayer={() => {
+              setNewPlayerName('');
+              setAddingPlayerSide('A');
+            }}
+            isAddingPlayer={addingPlayerSide === 'A'}
+            newPlayerName={newPlayerName}
+            onNewPlayerNameChange={setNewPlayerName}
+            onCancelAddPlayer={() => {
+              setAddingPlayerSide(null);
+              setNewPlayerName('');
+            }}
+            onConfirmAddPlayer={onAddPlayerInMatch}
+            dividerRight
+            getPlayerTeam={(teamId) => state.teams[teamId]?.name ?? ''}
+            isClosed={!!isClosed}
+          />
+          <RosterColumn
+            side="B"
+            color={teamB.color}
+            teamName={teamB.name}
+            players={teamBPlayers}
+            goalsByPlayer={goalsByPlayer}
+            onAddGoal={(playerId, borrowed) => onAddGoal('B', playerId, borrowed)}
+            onAddTeamGoal={() => onAddGoal('B', null)}
+            onBorrow={() => setBorrowFor('B')}
+            onStartAddPlayer={() => {
+              setNewPlayerName('');
+              setAddingPlayerSide('B');
+            }}
+            isAddingPlayer={addingPlayerSide === 'B'}
+            newPlayerName={newPlayerName}
+            onNewPlayerNameChange={setNewPlayerName}
+            onCancelAddPlayer={() => {
+              setAddingPlayerSide(null);
+              setNewPlayerName('');
+            }}
+            onConfirmAddPlayer={onAddPlayerInMatch}
+            getPlayerTeam={(teamId) => state.teams[teamId]?.name ?? ''}
+            isClosed={!!isClosed}
+          />
+        </div>
+      )}
 
       <StickyBottomCTA>
         <Button
@@ -343,6 +360,7 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
           fullWidth
           leading={<Flag size={18} strokeWidth={1.75} />}
           onClick={onFinish}
+          disabled={clockNotStarted}
         >
           Finalizar partida
         </Button>
@@ -384,9 +402,11 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
         open={drawDialog}
         onClose={() => setDrawDialog(false)}
         title={isFirst ? 'Empate en la primera partida' : 'Empate'}
+        dismissable={false}
       >
         <p className="text-body text-text-2 mb-4 leading-relaxed">
-          Los dos equipos salen. ¿Quién entra primero la próxima vez?
+          Los dos equipos salen. ¿Quién entra primero la próxima vez? Hay que elegir uno para
+          finalizar la partida.
         </p>
         <div className="grid grid-cols-2 gap-2">
           <button
