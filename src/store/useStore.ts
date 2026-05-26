@@ -73,6 +73,10 @@ interface StoreActions {
     isLoaned: boolean
   ): ID;
   removeGoal(goalId: ID): void;
+  reassignGoal(
+    goalId: ID,
+    opts: { playerId: ID | null; scoringForTeamId: ID; isLoaned: boolean }
+  ): void;
 
   // Settings
   setAutoAssignNextMatch(value: boolean): void;
@@ -380,6 +384,23 @@ export const useStore = create<Store>()(
           const next = { ...s.state.goals };
           delete next[goalId];
           return { state: { ...s.state, goals: next } };
+        }),
+
+      reassignGoal: (goalId, opts) =>
+        set((s) => {
+          const existing = s.state.goals[goalId];
+          if (!existing) return s;
+          const { playerId: _omit, ...rest } = existing;
+          void _omit;
+          const updated = {
+            ...rest,
+            ...(opts.playerId ? { playerId: opts.playerId } : {}),
+            scoringForTeamId: opts.scoringForTeamId,
+            isLoaned: opts.isLoaned,
+          };
+          return {
+            state: { ...s.state, goals: { ...s.state.goals, [goalId]: updated } },
+          };
         }),
 
       setAutoAssignNextMatch: (value) =>

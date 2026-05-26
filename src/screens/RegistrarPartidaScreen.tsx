@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Undo2, Flag, UserPlus, Trophy, Plus, Check, ShieldPlus } from 'lucide-react';
+import { ArrowLeft, ListOrdered, Flag, UserPlus, Trophy, Plus, Check, ShieldPlus } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { IconButton } from '@/components/primitives/IconButton';
 import { Button } from '@/components/primitives/Button';
@@ -9,6 +9,8 @@ import { Avatar } from '@/components/primitives/Avatar';
 import { Chip } from '@/components/primitives/Chip';
 import { StickyBottomCTA } from '@/components/primitives/StickyBottomCTA';
 import { MatchClock } from '@/components/domain/MatchClock';
+import { MatchGoalsDrawer } from '@/components/domain/MatchGoalsDrawer';
+import { MatchReassignSheet, type ReassignPick } from '@/components/domain/MatchReassignSheet';
 import { useStore } from '@/store/useStore';
 import {
   getMatchScore,
@@ -29,6 +31,7 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
   const state = useStore((s) => s.state);
   const addGoal = useStore((s) => s.addGoal);
   const removeGoal = useStore((s) => s.removeGoal);
+  const reassignGoal = useStore((s) => s.reassignGoal);
   const finishMatch = useStore((s) => s.finishMatch);
   const cancelMatch = useStore((s) => s.cancelMatch);
   const addToRoster = useStore((s) => s.addToRoster);
@@ -49,9 +52,6 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
   const [backConfirmOpen, setBackConfirmOpen] = useState(false);
   const [popKeyA, setPopKeyA] = useState(0);
   const [popKeyB, setPopKeyB] = useState(0);
-  const [undoStack, setUndoStack] = useState<ID[]>(
-    () => (match ? getMatchGoalsOrdered(state, match.id).map((g) => g.id) : [])
-  );
   const [elapsed, setElapsed] = useState(0);
   const lastGoalAtRef = useRef(0);
   const limitOverrideRef = useRef(false);
@@ -60,6 +60,8 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
     playerId: ID | null;
     borrowedFromTeamId?: ID;
   } | null>(null);
+  const [goalsDrawerOpen, setGoalsDrawerOpen] = useState(false);
+  const [reassignGoalId, setReassignGoalId] = useState<ID | null>(null);
 
   // Timer
   useEffect(() => {
@@ -78,14 +80,13 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
     }
   }, [match, navigate]);
 
-  useEffect(() => {
-    if (!match) return;
-    setUndoStack(getMatchGoalsOrdered(state, match.id).map((g) => g.id));
-  }, [matchId]);
-
   const score = useMemo(() => (match ? getMatchScore(state, match.id) : { goalsA: 0, goalsB: 0 }), [state, match]);
   const goalsByPlayer = useMemo(
     () => (match ? getGoalsByPlayerForMatch(state, match.id) : new Map<ID, number>()),
+    [state, match]
+  );
+  const matchGoals = useMemo(
+    () => (match ? getMatchGoalsOrdered(state, match.id) : []),
     [state, match]
   );
 
@@ -123,10 +124,9 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
     borrowedFromTeamId?: ID
   ) => {
     const scoringForTeamId = side === 'A' ? teamA.id : teamB.id;
-    const goalId = addGoal(match.id, playerId, scoringForTeamId, !!borrowedFromTeamId);
+    addGoal(match.id, playerId, scoringForTeamId, !!borrowedFromTeamId);
     if (side === 'A') setPopKeyA((k) => k + 1);
     else setPopKeyB((k) => k + 1);
-    setUndoStack((s) => [...s, goalId]);
   };
 
   const onAddGoal = (
@@ -156,16 +156,6 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
     addToRoster(match.id, addingPlayerSide, { playerId: newId });
     setAddingPlayerSide(null);
     setNewPlayerName('');
-  };
-
-  const onUndo = () => {
-    setUndoStack((stack) => {
-      if (stack.length === 0) return stack;
-      const next = stack.slice(0, -1);
-      const last = stack[stack.length - 1];
-      removeGoal(last);
-      return next;
-    });
   };
 
   const onBack = () => {
@@ -275,6 +265,18 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
             <Chip tone="neutral">Partida a {goalLimit} {goalLimit === 1 ? 'gol' : 'goles'}</Chip>
           </div>
         )}
+        {matchGoals.length > 0 && (
+          <div className="mt-2 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setGoalsDrawerOpen(true)}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-border bg-bg-elev2 text-caption font-medium active:bg-bg-elev"
+            >
+              <ListOrdered size={14} strokeWidth={1.75} />
+              Historial de goles ({matchGoals.length})
+            </button>
+          </div>
+        )}
         {limitHit && (
           <div className="mt-2 text-center text-caption text-accent">
             Límite alcanzado. Toca "Finalizar partida".
@@ -334,20 +336,6 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
           isClosed={!!isClosed}
         />
       </div>
-
-      {/* Undo chip — visible mientras el match esté abierto y haya goles para deshacer */}
-      {undoStack.length > 0 && !isClosed && (
-        <div className="fixed left-1/2 -translate-x-1/2 z-40" style={{ bottom: 'calc(96px + env(safe-area-inset-bottom))' }}>
-          <button
-            type="button"
-            onClick={onUndo}
-            className="inline-flex items-center gap-2 h-10 px-4 rounded-full bg-bg-elev2 border border-border-strong shadow-[0_8px_24px_rgba(0,0,0,0.5)] text-body-em font-medium animate-slide-up"
-          >
-            <Undo2 size={16} strokeWidth={1.75} />
-            Deshacer último gol
-          </button>
-        </div>
-      )}
 
       <StickyBottomCTA>
         <Button
@@ -457,6 +445,47 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
           setOverrideConfirm(null);
         }}
         onCancel={() => setOverrideConfirm(null)}
+      />
+
+      <MatchGoalsDrawer
+        open={goalsDrawerOpen}
+        onClose={() => setGoalsDrawerOpen(false)}
+        match={match}
+        goals={matchGoals}
+        teamA={teamA}
+        teamB={teamB}
+        players={state.players}
+        onStartReassign={(goalId) => {
+          setGoalsDrawerOpen(false);
+          setReassignGoalId(goalId);
+        }}
+        onRemove={(goalId) => removeGoal(goalId)}
+      />
+
+      <MatchReassignSheet
+        open={!!reassignGoalId}
+        onClose={() => setReassignGoalId(null)}
+        teamA={teamA}
+        teamB={teamB}
+        rosterA={teamAPlayers}
+        rosterB={teamBPlayers}
+        onPick={(pick: ReassignPick) => {
+          if (!reassignGoalId) return;
+          if (pick.kind === 'team') {
+            reassignGoal(reassignGoalId, {
+              playerId: null,
+              scoringForTeamId: pick.scoringForTeamId,
+              isLoaned: false,
+            });
+          } else {
+            reassignGoal(reassignGoalId, {
+              playerId: pick.playerId,
+              scoringForTeamId: pick.scoringForTeamId,
+              isLoaned: pick.isLoaned,
+            });
+          }
+          setReassignGoalId(null);
+        }}
       />
     </ScreenShell>
   );
