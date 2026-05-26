@@ -37,3 +37,7 @@ docs
 
 # claude code local config
 .claude
+
+# local-only working docs (no van al repo)
+FIXES_LOG.md
+TESTING_PLAN.md
