@@ -46,12 +46,20 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
   const [newPlayerName, setNewPlayerName] = useState('');
   const [drawDialog, setDrawDialog] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [backConfirmOpen, setBackConfirmOpen] = useState(false);
   const [popKeyA, setPopKeyA] = useState(0);
   const [popKeyB, setPopKeyB] = useState(0);
-  const [undoStack, setUndoStack] = useState<ID[]>([]);
-  const undoTimerRef = useRef<number | null>(null);
-  const [undoVisible, setUndoVisible] = useState(false);
+  const [undoStack, setUndoStack] = useState<ID[]>(
+    () => (match ? getMatchGoalsOrdered(state, match.id).map((g) => g.id) : [])
+  );
   const [elapsed, setElapsed] = useState(0);
+  const lastGoalAtRef = useRef(0);
+  const limitOverrideRef = useRef(false);
+  const [overrideConfirm, setOverrideConfirm] = useState<{
+    side: 'A' | 'B';
+    playerId: ID | null;
+    borrowedFromTeamId?: ID;
+  } | null>(null);
 
   // Timer
   useEffect(() => {
@@ -71,10 +79,9 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
   }, [match, navigate]);
 
   useEffect(() => {
-    return () => {
-      if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
-    };
-  }, []);
+    if (!match) return;
+    setUndoStack(getMatchGoalsOrdered(state, match.id).map((g) => g.id));
+  }, [matchId]);
 
   const score = useMemo(() => (match ? getMatchScore(state, match.id) : { goalsA: 0, goalsB: 0 }), [state, match]);
   const goalsByPlayer = useMemo(
@@ -100,6 +107,8 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
   const goalLimit = match.goalLimit;
   const limitHit =
     !isClosed && (score.goalsA >= goalLimit || score.goalsB >= goalLimit) && score.goalsA !== score.goalsB;
+  // Reset del override cuando el límite ya no aplica (ej: tras deshacer goles o reabrir match).
+  if (!limitHit) limitOverrideRef.current = false;
 
   const teamAPlayers = match.rosterA
     .map((entry) => ({ entry, player: state.players[entry.playerId] }))
@@ -108,22 +117,32 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
     .map((entry) => ({ entry, player: state.players[entry.playerId] }))
     .filter((x): x is { entry: MatchRosterEntry; player: Player } => !!x.player);
 
+  const doAddGoal = (
+    side: 'A' | 'B',
+    playerId: ID | null,
+    borrowedFromTeamId?: ID
+  ) => {
+    const scoringForTeamId = side === 'A' ? teamA.id : teamB.id;
+    const goalId = addGoal(match.id, playerId, scoringForTeamId, !!borrowedFromTeamId);
+    if (side === 'A') setPopKeyA((k) => k + 1);
+    else setPopKeyB((k) => k + 1);
+    setUndoStack((s) => [...s, goalId]);
+  };
+
   const onAddGoal = (
     side: 'A' | 'B',
     playerId: ID | null,
     borrowedFromTeamId?: ID
   ) => {
     if (isClosed) return;
-    const scoringForTeamId = side === 'A' ? teamA.id : teamB.id;
-    const goalId = addGoal(match.id, playerId, scoringForTeamId, !!borrowedFromTeamId);
-    if (side === 'A') setPopKeyA((k) => k + 1);
-    else setPopKeyB((k) => k + 1);
-    setUndoStack((s) => [...s, goalId]);
-    setUndoVisible(true);
-    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
-    undoTimerRef.current = window.setTimeout(() => {
-      setUndoVisible(false);
-    }, 5000);
+    const now = Date.now();
+    if (now - lastGoalAtRef.current < 600) return;
+    lastGoalAtRef.current = now;
+    if (limitHit && !limitOverrideRef.current) {
+      setOverrideConfirm({ side, playerId, borrowedFromTeamId });
+      return;
+    }
+    doAddGoal(side, playerId, borrowedFromTeamId);
   };
 
   const onAddPlayerInMatch = () => {
@@ -147,7 +166,14 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
       removeGoal(last);
       return next;
     });
-    setUndoVisible(false);
+  };
+
+  const onBack = () => {
+    if (isClosed) {
+      back();
+      return;
+    }
+    setBackConfirmOpen(true);
   };
 
   const playersOfOthers = (excludeTeamId: ID, currentRosterIds: Set<ID>): Player[] => {
@@ -196,7 +222,7 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
   return (
     <ScreenShell>
       <header className="sticky top-0 z-30 backdrop-blur-md bg-bg/85 border-b border-border px-4 py-2.5 flex items-center gap-2">
-        <IconButton ariaLabel="Volver" onClick={back}>
+        <IconButton ariaLabel="Volver" onClick={onBack}>
           <ArrowLeft size={20} strokeWidth={1.75} />
         </IconButton>
         <div className="flex-1 flex flex-col items-center min-w-0">
@@ -309,8 +335,8 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
         />
       </div>
 
-      {/* Undo chip */}
-      {undoVisible && undoStack.length > 0 && (
+      {/* Undo chip — visible mientras el match esté abierto y haya goles para deshacer */}
+      {undoStack.length > 0 && !isClosed && (
         <div className="fixed left-1/2 -translate-x-1/2 z-40" style={{ bottom: 'calc(96px + env(safe-area-inset-bottom))' }}>
           <button
             type="button"
@@ -402,6 +428,35 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
         danger
         onConfirm={confirmCancel}
         onCancel={() => setCancelOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={backConfirmOpen}
+        title="Salir del partido"
+        description="El partido sigue en curso. Si salís ahora podés volver desde la jornada. ¿Continuar?"
+        confirmLabel="Salir"
+        cancelLabel="Seguir jugando"
+        onConfirm={() => {
+          setBackConfirmOpen(false);
+          back();
+        }}
+        onCancel={() => setBackConfirmOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={!!overrideConfirm}
+        title="Límite alcanzado"
+        description="Ya se alcanzó el límite de goles. ¿Agregar igual?"
+        confirmLabel="Agregar gol"
+        onConfirm={() => {
+          if (overrideConfirm) {
+            limitOverrideRef.current = true;
+            const { side, playerId, borrowedFromTeamId } = overrideConfirm;
+            doAddGoal(side, playerId, borrowedFromTeamId);
+          }
+          setOverrideConfirm(null);
+        }}
+        onCancel={() => setOverrideConfirm(null)}
       />
     </ScreenShell>
   );
