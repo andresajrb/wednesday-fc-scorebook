@@ -1,4 +1,9 @@
+import { useEffect } from 'react';
 import { useStore } from '@/store/useStore';
+import { getOpenJornada } from '@/store/selectors';
+import { UpdatePrompt } from '@/components/UpdatePrompt';
+import { WriteErrorBanner } from '@/components/WriteErrorBanner';
+import { requestPersistentStorage } from '@/lib/storage-health';
 import { OnboardingScreen } from '@/screens/OnboardingScreen';
 import { HomeScreen } from '@/screens/HomeScreen';
 import { JornadaActivaScreen } from '@/screens/JornadaActivaScreen';
@@ -6,10 +11,9 @@ import { RegistrarPartidaScreen } from '@/screens/RegistrarPartidaScreen';
 import { ResumenJornadaScreen } from '@/screens/ResumenJornadaScreen';
 import { DetalleEquipoScreen } from '@/screens/DetalleEquipoScreen';
 import { ConfiguracionScreen } from '@/screens/ConfiguracionScreen';
+import type { Screen } from '@/types/domain';
 
-export default function App() {
-  const screen = useStore((s) => s.ui.currentScreen);
-
+function renderScreen(screen: Screen) {
   switch (screen.name) {
     case 'onboarding':
       return <OnboardingScreen />;
@@ -26,4 +30,33 @@ export default function App() {
     case 'settings':
       return <ConfiguracionScreen />;
   }
+}
+
+export default function App() {
+  const screen = useStore((s) => s.ui.currentScreen);
+
+  useEffect(() => {
+    void requestPersistentStorage();
+  }, []);
+
+  // Atajo del manifest ("Iniciar jornada de hoy"). Corre después de la compuerta
+  // de hidratación, así que `state` ya es el real y no crea una jornada duplicada.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('action') !== 'start-jornada') return;
+    window.history.replaceState({}, '', window.location.pathname);
+    const store = useStore.getState();
+    if (!store.state.config.onboardingDone) return;
+    const open = getOpenJornada(store.state);
+    const jornadaId = open ? open.id : store.startJornada();
+    store.navigate({ name: 'jornada-active', jornadaId });
+  }, []);
+
+  return (
+    <>
+      <WriteErrorBanner />
+      {renderScreen(screen)}
+      <UpdatePrompt />
+    </>
+  );
 }

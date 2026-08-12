@@ -2,13 +2,31 @@
 <html lang="es" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#0a0a0a" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <link rel="manifest" href="/manifest.webmanifest" />
     <title>Miércoles de Fútbol</title>
+    <meta
+      name="description"
+      content="Registra partidos, goles y estadísticas del fútbol de los miércoles. Sin cuentas y sin conexión."
+    />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- iOS ignora los iconos SVG del manifest: necesita este PNG sí o sí. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Miércoles" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Miércoles de Fútbol" />
+    <meta
+      property="og:description"
+      content="Registra partidos, goles y estadísticas del fútbol de los miércoles."
+    />
+    <meta property="og:image" content="/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
   </head>
   <body>
     <div id="root"></div>

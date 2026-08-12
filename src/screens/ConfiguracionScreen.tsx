@@ -1,5 +1,13 @@
-import { useRef, useState } from 'react';
-import { ArrowLeft, Download, Upload, Trash2, ChevronRight } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  Download,
+  Upload,
+  Trash2,
+  ChevronRight,
+  History,
+  Smartphone,
+} from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { Header } from '@/components/primitives/Header';
 import { IconButton } from '@/components/primitives/IconButton';
@@ -9,8 +17,17 @@ import { BottomSheet } from '@/components/primitives/BottomSheet';
 import { ToggleSwitch } from '@/components/primitives/ToggleSwitch';
 import { TeamSwatch } from '@/components/domain/TeamSwatch';
 import { useStore } from '@/store/useStore';
-import { downloadBackup, readBackupFile, BackupError } from '@/lib/backup';
+import { downloadBackup, downloadBackupFile, readBackupFile, BackupError } from '@/lib/backup';
 import { COLOR_SWATCHES } from '@/lib/colors';
+import { formatBytes, readStorageHealth, type StorageHealth } from '@/lib/storage-health';
+import { isIOS, isStandalone, promptInstall, useCanInstall } from '@/lib/install';
+import {
+  getSnapshotBackup,
+  listSnapshots,
+  readSnapshot,
+  snapshotReasonLabel,
+  type SnapshotInfo,
+} from '@/store/snapshots';
 import { SCHEMA_VERSION } from '@/types/domain';
 
 export function ConfiguracionScreen() {
@@ -44,6 +61,45 @@ export function ConfiguracionScreen() {
   const [resetOpen, setResetOpen] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const canInstall = useCanInstall();
+  const standalone = isStandalone();
+  const ios = isIOS();
+
+  const [snapshots, setSnapshots] = useState<SnapshotInfo[]>([]);
+  const [restoreTarget, setRestoreTarget] = useState<SnapshotInfo | null>(null);
+  const [storage, setStorage] = useState<StorageHealth | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listSnapshots().then((found) => {
+      if (!cancelled) setSnapshots(found);
+    });
+    void readStorageHealth().then((health) => {
+      if (!cancelled) setStorage(health);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [state]);
+
+  const confirmRestoreSnapshot = async () => {
+    if (!restoreTarget) return;
+    try {
+      replaceState(await readSnapshot(restoreTarget.key));
+    } catch {
+      setImportError('Ese respaldo automático no se pudo leer.');
+    }
+    setRestoreTarget(null);
+  };
+
+  const onDownloadSnapshot = async (snapshot: SnapshotInfo) => {
+    try {
+      downloadBackupFile(await getSnapshotBackup(snapshot.key), 'respaldo-automatico');
+    } catch {
+      setImportError('Ese respaldo automático no se pudo descargar.');
+    }
+  };
 
   const teams = Object.values(state.teams);
 
@@ -206,15 +262,118 @@ export function ConfiguracionScreen() {
 
         <section>
           <div className="text-caption uppercase tracking-wider text-text-2 font-semibold mb-2">
+            Respaldos automáticos
+          </div>
+          {snapshots.length === 0 ? (
+            <p className="text-caption text-text-3 leading-relaxed">
+              La app guarda una copia al abrirse y otra cada vez que cierras una jornada. Todavía no
+              hay ninguna.
+            </p>
+          ) : (
+            <div className="bg-bg-elev border border-border rounded-card overflow-hidden">
+              {snapshots.map((snapshot, idx) => (
+                <div key={snapshot.key} className={`p-3 ${idx > 0 ? 'border-t border-border' : ''}`}>
+                  <div className="flex items-center gap-2">
+                    <History size={16} className="text-text-3" strokeWidth={1.75} />
+                    <span className="text-body-em font-semibold flex-1 min-w-0 truncate">
+                      {snapshotReasonLabel(snapshot.reason)}
+                    </span>
+                    <span className="text-caption text-text-3 font-mono">
+                      {snapshot.savedAt.slice(0, 10)}
+                    </span>
+                  </div>
+                  <div className="text-caption text-text-2 mt-1">
+                    {snapshot.players} jugadores · {snapshot.teams} equipos · {snapshot.jornadas}{' '}
+                    jornadas
+                  </div>
+                  <div className="flex gap-2 mt-2">
+                    <Button size="sm" variant="secondary" onClick={() => setRestoreTarget(snapshot)}>
+                      Restaurar
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => void onDownloadSnapshot(snapshot)}>
+                      Descargar
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <div className="text-caption uppercase tracking-wider text-text-2 font-semibold mb-2">
+            Instalar la app
+          </div>
+          {standalone ? (
+            <div className="rounded-card border border-accent/30 bg-accent-soft p-4 flex items-start gap-3">
+              <Smartphone size={18} strokeWidth={1.75} className="text-accent flex-shrink-0 mt-0.5" />
+              <p className="text-body text-text-2 leading-relaxed">
+                Ya está instalada. Así el navegador no borra tus datos aunque pasen semanas sin
+                abrirla.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-card border border-border bg-bg-elev p-4 space-y-3">
+              <p className="text-body text-text-2 leading-relaxed">
+                Instalarla no es solo comodidad:{' '}
+                <span className="text-text font-semibold">
+                  protege tus datos de que el navegador los borre
+                </span>
+                . Safari borra el almacenamiento de las webs tras unos días sin usarlas, y esta app
+                se abre una vez por semana.
+              </p>
+              {canInstall ? (
+                <Button
+                  size="lg"
+                  fullWidth
+                  leading={<Smartphone size={18} strokeWidth={1.75} />}
+                  onClick={() => void promptInstall()}
+                >
+                  Instalar app
+                </Button>
+              ) : ios ? (
+                <ol className="text-body text-text-2 leading-relaxed list-decimal pl-5 space-y-1">
+                  <li>Tocá el botón Compartir de Safari.</li>
+                  <li>Elegí «Añadir a pantalla de inicio».</li>
+                  <li>Abrí la app desde el icono nuevo.</li>
+                </ol>
+              ) : (
+                <p className="text-caption text-text-3 leading-relaxed">
+                  Buscá «Instalar app» o «Añadir a pantalla de inicio» en el menú de tu navegador.
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <div className="text-caption uppercase tracking-wider text-text-2 font-semibold mb-2">
             Acerca de
           </div>
           <div className="bg-bg-elev border border-border rounded-card overflow-hidden">
-            <InfoRow label="Versión" value="0.1.0 — MVP" />
+            <InfoRow label="Versión" value="0.2.0" />
             <InfoRow label="Schema" value={`v${SCHEMA_VERSION}`} />
+            <InfoRow
+              label="Almacenamiento persistente"
+              value={
+                storage === null
+                  ? '…'
+                  : !storage.supported
+                    ? 'No disponible'
+                    : storage.persisted
+                      ? 'Sí'
+                      : 'No'
+              }
+            />
+            <InfoRow label="Espacio usado" value={formatBytes(storage?.usageBytes ?? null)} />
             <button
               type="button"
               onClick={() =>
-                window.open('https://github.com', '_blank', 'noreferrer')
+                window.open(
+                  'https://github.com/andresajrb/wednesday-fc-scorebook',
+                  '_blank',
+                  'noreferrer'
+                )
               }
               className="w-full flex items-center gap-3 p-3 border-t border-border active:bg-bg-elev2"
             >
@@ -284,6 +443,20 @@ export function ConfiguracionScreen() {
         danger
         onConfirm={confirmImport}
         onCancel={() => setImportBackup(null)}
+      />
+
+      <ConfirmDialog
+        open={!!restoreTarget}
+        title="Restaurar respaldo automático"
+        description={
+          restoreTarget
+            ? `Esto reemplazará tus datos actuales con la copia del ${restoreTarget.savedAt.slice(0, 10)} (${restoreTarget.players} jugadores). Antes de reemplazar se guarda una copia de lo que tienes ahora.`
+            : undefined
+        }
+        confirmLabel="Restaurar"
+        danger
+        onConfirm={() => void confirmRestoreSnapshot()}
+        onCancel={() => setRestoreTarget(null)}
       />
 
       <ConfirmDialog
