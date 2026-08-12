@@ -12,11 +12,21 @@ import { DEFAULT_MATCH_DURATION_SECONDS, SCHEMA_VERSION } from '@/types/domain';
 import {
   localforageStorage,
   clearStorage,
+  clearHydrationFailure,
   consumeHydrationError,
+  hydrationFailed,
+  isApplyingRemoteChange,
   reportHydrationError,
+  setApplyingRemoteChange,
   subscribeHydrationError,
+  subscribeRemoteChange,
+  subscribeWriteError,
+  unlockWrites,
+  writesAreLocked,
   type HydrateError,
+  type WriteError,
 } from './persistence';
+import { clearSnapshots, looksLikeDataLoss, rotateSnapshot, writeBootSnapshot } from './snapshots';
 import { migrateAppState } from './migrations';
 import { todayISODate } from '@/lib/format';
 
@@ -38,6 +48,11 @@ interface StoreData {
     history: NavStackEntry[];
   };
   hydrateError: HydrateError | null;
+  /** Falso hasta que la hidratación termina (con o sin error). Ninguna pantalla se
+   *  monta antes: renderizar con el estado inicial vacío es lo que provocaba el
+   *  flash de Onboarding y, con él, la pérdida de datos. */
+  hydrationSettled: boolean;
+  writeError: WriteError | null;
 }
 
 interface StoreActions {
@@ -93,6 +108,7 @@ interface StoreActions {
   // Hydration
   setHydrateError(err: HydrateError | null): void;
   clearHydrateError(): void;
+  clearWriteError(): void;
 
   // Navigation
   navigate(screen: Screen, opts?: { replace?: boolean }): void;
@@ -132,17 +148,39 @@ export const useStore = create<Store>()(
       state: initialState,
       ui: makeInitialUI(initialState),
       hydrateError: null,
+      hydrationSettled: false,
+      writeError: null,
 
       setHydrateError: (err) => set(() => ({ hydrateError: err })),
       clearHydrateError: () => set(() => ({ hydrateError: null })),
+      clearWriteError: () => set(() => ({ writeError: null })),
 
       completeOnboarding: (teamsInput) =>
         set((s) => {
+          const existing = Object.values(s.state.teams);
           const teams: Record<ID, Team> = {};
-          for (const t of teamsInput) {
-            const id = newId();
-            teams[id] = { id, name: t.name, color: t.color, createdAt: nowISO() };
+
+          if (existing.length > 0) {
+            // Ya hay equipos: renombrar y recolorear los que están, nunca generar
+            // IDs nuevos. Regenerarlos dejaba a todos los jugadores apuntando a
+            // equipos inexistentes, o sea invisibles en toda la app.
+            const ordered = existing.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+            for (const team of ordered) teams[team.id] = team;
+            ordered.forEach((team, i) => {
+              const input = teamsInput[i];
+              if (input) teams[team.id] = { ...team, name: input.name, color: input.color };
+            });
+            for (const input of teamsInput.slice(ordered.length)) {
+              const id = newId();
+              teams[id] = { id, name: input.name, color: input.color, createdAt: nowISO() };
+            }
+          } else {
+            for (const t of teamsInput) {
+              const id = newId();
+              teams[id] = { id, name: t.name, color: t.color, createdAt: nowISO() };
+            }
           }
+
           return {
             state: {
               ...s.state,
@@ -248,7 +286,7 @@ export const useStore = create<Store>()(
         return id;
       },
 
-      closeJornada: (jornadaId) =>
+      closeJornada: (jornadaId) => {
         set((s) => {
           const j = s.state.jornadas[jornadaId];
           if (!j) return s;
@@ -261,7 +299,11 @@ export const useStore = create<Store>()(
               },
             },
           };
-        }),
+        });
+        // Cerrar la jornada es el hito natural del día: buen momento para rotar
+        // el respaldo automático.
+        void rotateSnapshot(get().state, 'jornada');
+      },
 
       reopenJornada: (jornadaId) =>
         set((s) => {
@@ -456,15 +498,27 @@ export const useStore = create<Store>()(
           };
         }),
 
-      replaceState: (next) =>
+      replaceState: (next) => {
+        // Guardamos lo que había ANTES de pisarlo: importar un respaldo
+        // equivocado no debe ser un camino sin vuelta.
+        void rotateSnapshot(get().state, 'import');
+        clearHydrationFailure();
+        unlockWrites();
         set(() => ({
           state: next,
           ui: { currentScreen: { name: 'home' }, history: [] },
-        })),
+          hydrateError: null,
+        }));
+      },
 
       resetAll: async () => {
         await clearStorage();
+        await clearSnapshots();
         const fresh = makeInitialState();
+        // Un reset explícito es la única vía legítima para reabrir el candado
+        // cuando la hidratación falló.
+        clearHydrationFailure();
+        unlockWrites();
         set(() => ({
           state: fresh,
           ui: makeInitialUI(fresh),
@@ -526,20 +580,103 @@ export const useStore = create<Store>()(
           return ps;
         } catch (err) {
           reportHydrationError({ kind: 'migration', message: String(err) });
-          return persistedState;
+          // Relanzamos a propósito. Si devolviéramos el estado sin migrar, zustand
+          // lo tomaría como migración exitosa y sellaría `version: SCHEMA_VERSION`
+          // en el envoltorio: la migración no volvería a intentarse nunca y la
+          // corrupción quedaría grabada para siempre.
+          throw err;
         }
+      },
+      merge: (persistedState, current) => {
+        const persisted = persistedState as Partial<StoreData> | undefined;
+        if (!persisted) return current;
+        const merged = { ...current, ...persisted } as Store;
+        // Si el cambio vino de otra pestaña, adoptamos sus datos pero no su
+        // navegación: que la pantalla salte sola mientras estás mirando otra cosa
+        // es desconcertante.
+        merged.ui = sanitizeUI(
+          isApplyingRemoteChange() ? current.ui : persisted.ui,
+          merged.state
+        );
+        return merged;
+      },
+      onRehydrateStorage: () => (hydrated, error) => {
+        if (error || !hydrated || hydrationFailed()) {
+          // El candado de escritura sigue cerrado: los bytes en disco quedan
+          // intactos y recuperables desde la pantalla de error.
+          useStore.setState({ hydrationSettled: true });
+          return;
+        }
+        unlockWrites();
+        useStore.setState({ hydrationSettled: true });
+        void writeBootSnapshot(hydrated.state);
+        void looksLikeDataLoss(hydrated.state).then((lost) => {
+          if (!lost) return;
+          useStore.setState({
+            hydrateError: {
+              kind: 'empty',
+              message: 'Estado vacío con respaldos disponibles.',
+            },
+          });
+        });
       },
     }
   )
 );
 
+/**
+ * La navegación se persiste, así que puede apuntar a entidades que ya no existen
+ * (una partida borrada, una jornada eliminada). Validamos contra el estado real
+ * y descartamos siempre el back-stack: en un arranque nuevo no significa nada.
+ */
+function sanitizeUI(ui: StoreData['ui'] | undefined, state: AppState): StoreData['ui'] {
+  const fallback = makeInitialUI(state);
+  const screen = ui?.currentScreen;
+  if (!screen) return fallback;
+
+  const exists = (() => {
+    switch (screen.name) {
+      case 'team-detail':
+        return Boolean(state.teams[screen.teamId]);
+      case 'jornada-active':
+      case 'summary':
+        return Boolean(state.jornadas[screen.jornadaId]);
+      case 'match-record':
+        return Boolean(state.matches[screen.matchId]);
+      default:
+        return true;
+    }
+  })();
+
+  if (!exists) return fallback;
+  if (screen.name === 'onboarding' && state.config.onboardingDone) return fallback;
+  return { currentScreen: screen, history: [] };
+}
+
 // Si el storage detectó JSON corrupto o migración fallida durante el hidratado,
 // hacemos visible el error al primer render via el flag del store.
 // Suscripción al evento de error (puede llegar después del create por ser async).
 subscribeHydrationError((err) => {
-  useStore.setState({ hydrateError: err });
+  useStore.setState({ hydrateError: err, hydrationSettled: true });
 });
 const initialHydrationError = consumeHydrationError();
 if (initialHydrationError) {
-  useStore.setState({ hydrateError: initialHydrationError });
+  useStore.setState({ hydrateError: initialHydrationError, hydrationSettled: true });
 }
+
+// Una escritura fallida (cuota llena, IndexedDB abortado, modo privado) era hasta
+// ahora completamente invisible: la app seguía mostrando datos que nunca llegaron
+// al disco.
+subscribeWriteError((err) => {
+  useStore.setState({ writeError: err });
+});
+
+// Si otra pestaña guardó algo, releemos en vez de seguir con nuestra copia vieja
+// y pisarla en la próxima escritura.
+subscribeRemoteChange(() => {
+  if (writesAreLocked()) return;
+  setApplyingRemoteChange(true);
+  void Promise.resolve(useStore.persist.rehydrate()).finally(() => {
+    setApplyingRemoteChange(false);
+  });
+});

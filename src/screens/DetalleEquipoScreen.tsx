@@ -5,7 +5,6 @@ import {
   MoreHorizontal,
   Plus,
   Shield,
-  Trash2,
   ArrowLeftRight,
   User,
   Pencil,
@@ -368,15 +367,6 @@ export function DetalleEquipoScreen({ teamId }: DetalleEquipoScreenProps) {
                 }}
               />
             )}
-            <SheetAction
-              icon={<Trash2 size={18} strokeWidth={1.75} />}
-              label="Quitar del equipo"
-              danger
-              onClick={() => {
-                setPlayerActive(actionPlayer.id, false);
-                setActionPlayer(null);
-              }}
-            />
           </div>
         )}
       </BottomSheet>

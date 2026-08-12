@@ -13,19 +13,40 @@ export function buildBackup(state: AppState): BackupFile {
   };
 }
 
-export function downloadBackup(state: AppState): void {
-  const backup = buildBackup(state);
-  const json = JSON.stringify(backup, null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
+export function downloadJsonText(text: string, filename: string): void {
+  const blob = new Blob([text], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const date = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `miercoles-futbol-${date}.json`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function todayStamp(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function downloadBackup(state: AppState): void {
+  downloadJsonText(
+    JSON.stringify(buildBackup(state), null, 2),
+    `miercoles-futbol-${todayStamp()}.json`
+  );
+}
+
+export function downloadBackupFile(backup: BackupFile, label: string): void {
+  downloadJsonText(JSON.stringify(backup, null, 2), `miercoles-futbol-${label}-${todayStamp()}.json`);
+}
+
+/**
+ * Descarga los bytes tal como estaban en disco, sin parsear ni normalizar. Es lo
+ * único que sirve cuando el blob está dañado: cualquier intento de "arreglarlo"
+ * antes de guardarlo destruye justamente lo que se quiere rescatar.
+ */
+export function downloadRawBlob(raw: string): void {
+  downloadJsonText(raw, `miercoles-futbol-crudo-${todayStamp()}.json`);
 }
 
 export class BackupError extends Error {
