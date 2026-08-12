@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>WFC — una tinta</title>
+
+  <circle cx="256" cy="256" r="226" fill="none" stroke="currentColor" stroke-width="26" stroke-dasharray="206.65 30" transform="rotate(-26.2 256 256)"></circle>
+  <g transform="translate(256,256) scale(0.76) translate(-283.9,-256)">
+  <g fill="none" stroke="currentColor" stroke-width="42.10526315789474" stroke-linecap="butt" stroke-linejoin="miter">
+    <path d="M95 181 L128 315 L158 225 L188 315 L221 181"></path>
+    <path d="M269 331 L269 181 L333 181"></path>
+    <path d="M269 256 L321 256"></path>
+    <path d="M472.85 303.49 A 62 62 0 1 1 472.85 208.51"></path>
+  </g></g>
+</svg>

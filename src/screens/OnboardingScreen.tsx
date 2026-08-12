@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { Button } from '@/components/primitives/Button';
 import { TeamSwatch } from '@/components/domain/TeamSwatch';
-import { BallIcon } from '@/components/primitives/BallIcon';
+import { Logo } from '@/components/primitives/Logo';
 import { useStore } from '@/store/useStore';
 import { DEFAULT_TEAMS, COLOR_SWATCHES } from '@/lib/colors';
 
@@ -23,9 +23,7 @@ export function OnboardingScreen() {
     <ScreenShell>
       <div className="flex-1 px-5 pt-12 pb-6">
         <div className="flex items-center gap-3 mb-6">
-          <span className="inline-flex items-center justify-center w-12 h-12 rounded-card bg-accent text-text-inv">
-            <BallIcon size={26} strokeWidth={1.6} />
-          </span>
+          <Logo size={48} className="text-accent flex-shrink-0" />
           <div>
             <h1 className="text-title font-bold tracking-tight">Miércoles de Fútbol</h1>
             <p className="text-caption text-text-2">Configura tus 4 equipos</p>

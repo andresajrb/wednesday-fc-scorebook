@@ -2,7 +2,7 @@ import { Settings, Play, ArrowRight, Trophy, ChevronRight } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { Button } from '@/components/primitives/Button';
 import { IconButton } from '@/components/primitives/IconButton';
-import { BallIcon } from '@/components/primitives/BallIcon';
+import { Logo } from '@/components/primitives/Logo';
 import { TeamCard } from '@/components/domain/TeamCard';
 import { useStore } from '@/store/useStore';
 import {
@@ -35,9 +35,7 @@ export function HomeScreen() {
   return (
     <ScreenShell>
       <header className="sticky top-0 z-30 backdrop-blur-md bg-bg/85 border-b border-border px-4 py-2.5 flex items-center gap-3">
-        <span className="inline-flex items-center justify-center w-8 h-8 rounded-md bg-accent text-text-inv">
-          <BallIcon size={18} strokeWidth={1.6} />
-        </span>
+        <Logo size={32} className="text-accent flex-shrink-0" />
         <h1 className="text-[22px] font-bold tracking-tight flex-1">Miércoles</h1>
         <IconButton ariaLabel="Configuración" onClick={() => navigate({ name: 'settings' })}>
           <Settings size={20} strokeWidth={1.75} />
