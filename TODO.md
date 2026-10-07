@@ -10,7 +10,7 @@ Leyenda: `[ ]` pendiente · `[~]` en conversación · `[x]` hecho
 
 ## 1. Listo para hacer
 
-### [ ] Texto del resumen para WhatsApp (mejorar el existente)
+### [x] Texto del resumen para WhatsApp (mejorar el existente)
 - Hoy existe en `ResumenJornadaScreen.tsx` (`buildShareText`): equipo del día, tabla y top 3 goleadores en texto plano.
 - Formato WhatsApp: `*negrita*`, `_cursiva_`, emoji por equipo (🔵🟢⚫🔴).
 - Agregar marcadores de cada partida y curiosidades del día (hat-tricks, equipo que más se quedó en
@@ -19,7 +19,7 @@ Leyenda: `[ ]` pendiente · `[~]` en conversación · `[x]` hecho
 - Extraer los datos y curiosidades a un selector reutilizable: la imagen usa los mismos datos.
 - Link a la app al final: solo cuando haya marca y dominio definitivos.
 
-### [ ] Imagen del resumen de jornada (compartible)
+### [x] Imagen del resumen de jornada (compartible)
 - Va después del texto: reutiliza sus datos y su versión corta como pie de foto.
 - Generar un PNG desde el resumen (equipo del día, tabla, goleadores, total de partidas y goles).
 - Formato vertical 1080×1350 (WhatsApp / Instagram), con colores de cada equipo.
@@ -30,19 +30,19 @@ Leyenda: `[ ]` pendiente · `[~]` en conversación · `[x]` hecho
   de abrir la hoja y avisar "Texto copiado, pégalo como pie de foto si no aparece".
 - Mientras no haya marca definitiva, no difundir fuera del grupo.
 
-### [ ] Bocina / vibración al terminar el tiempo
+### [x] Bocina / vibración al terminar el tiempo
 - Sonido al llegar a 0 y aviso de "último minuto".
 - Vibración donde exista (`navigator.vibrate`; iOS Safari no lo soporta).
 - El audio debe "desbloquearse" con el toque de "Listo, empezar" (los navegadores bloquean audio sin gesto).
 - Evaluar Wake Lock API para que la pantalla no se apague durante la partida.
 - Toggle en Configuración (sonido sí/no, vibración sí/no).
 
-### [ ] Tabla en vivo durante la jornada (opcional)
+### [x] Tabla en vivo durante la jornada (opcional)
 - Desde la jornada activa, ver cómo va: tabla de equipos (PJ, G, E, P, GF, GC, pts) y goleadores del día.
 - Opcional/colapsable para no ensuciar la pantalla principal de juego.
 - Reutilizar `getStandings` y `getTopScorers` (hoy solo se ven en el resumen al cerrar).
 
-### [ ] Equipos variables por jornada (3 a 6 equipos)
+### [x] Equipos variables por jornada (3 a 6 equipos)
 Caso real: un equipo fijo no pudo ir y se invitó a otro equipo que no es fijo, solo de reemplazo.
 - Hoy: los 4 equipos se crean en el onboarding (`DEFAULT_TEAMS`); no se pueden agregar ni quitar.
   `predictNextMatch` usa **todos** los equipos registrados como cola, así que si falta uno la predicción se rompe.
