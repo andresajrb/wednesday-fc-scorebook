@@ -1,13 +1,16 @@
+import { useMemo, useState } from 'react';
 import { ArrowLeft, Share2, Trophy, ArrowRight } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { IconButton } from '@/components/primitives/IconButton';
 import { Header } from '@/components/primitives/Header';
 import { Button } from '@/components/primitives/Button';
 import { Avatar } from '@/components/primitives/Avatar';
+import { StandingsTable } from '@/components/domain/StandingsTable';
+import { ShareSheet } from '@/components/domain/ShareSheet';
+import { getJornadaReport } from '@/lib/jornadaReport';
 import { useStore } from '@/store/useStore';
 import {
   getStandings,
-  getTopScorers,
   getJornadaWinnerTeam,
   getMatchesForJornada,
   getMatchScore,
@@ -26,7 +29,9 @@ export function ResumenJornadaScreen({ jornadaId }: ResumenJornadaScreenProps) {
   const navigate = useStore((s) => s.navigate);
   const state = useStore((s) => s.state);
   const jornada = state.jornadas[jornadaId];
-  if (!jornada) {
+  const report = useMemo(() => getJornadaReport(state, jornadaId), [state, jornadaId]);
+  const [shareOpen, setShareOpen] = useState(false);
+  if (!jornada || !report) {
     return (
       <ScreenShell>
         <Header
@@ -44,56 +49,12 @@ export function ResumenJornadaScreen({ jornadaId }: ResumenJornadaScreenProps) {
 
   const matches = getMatchesForJornada(state, jornadaId).filter((m) => m.endedAt);
   const standings = getStandings(state, jornadaId);
-  const topScorers = getTopScorers(state, jornadaId, 3);
+  // Mismo ranking que el texto y la imagen: los empatados comparten medalla.
+  const topScorers = report.scorers.slice(0, 3);
   const winner = getJornadaWinnerTeam(state, jornadaId);
   const winnerStanding = standings.find((s) => s.team.id === winner?.id);
 
-  const buildShareText = () => {
-    const lines: string[] = [];
-    lines.push(`⚽ Miércoles de Fútbol — ${formatDayShort(jornada.date)}`);
-    lines.push('');
-    if (winner && winnerStanding) {
-      lines.push(`🏆 Equipo del día: ${winner.name} (${winnerStanding.pts} pts)`);
-      lines.push('');
-    }
-    lines.push('Tabla:');
-    for (const r of standings) {
-      lines.push(`${r.team.name}: ${r.g}V ${r.e}E ${r.p}D · ${r.gf}-${r.gc} (${r.dif >= 0 ? '+' : ''}${r.dif}) · ${r.pts} pts`);
-    }
-    if (topScorers.length > 0) {
-      lines.push('');
-      lines.push('Goleadores:');
-      for (let i = 0; i < topScorers.length; i++) {
-        const s = topScorers[i];
-        const medal = ['🥇', '🥈', '🥉'][i] ?? '•';
-        lines.push(`${medal} ${s.player.name} (${s.team.name}) — ${s.goals}G`);
-      }
-    }
-    return lines.join('\n');
-  };
-
-  const onShare = async () => {
-    const text = buildShareText();
-    const nav = navigator as Navigator & {
-      share?: (data: ShareData) => Promise<void>;
-    };
-    if (typeof nav.share === 'function') {
-      try {
-        await nav.share({ title: 'Miércoles de Fútbol', text });
-      } catch {
-        // user cancelled
-      }
-      return;
-    }
-    if (nav.clipboard?.writeText) {
-      try {
-        await nav.clipboard.writeText(text);
-        alert('Resumen copiado al portapapeles');
-      } catch {
-        // ignore
-      }
-    }
-  };
+  const onShare = () => setShareOpen(true);
 
   const isClosed = jornada.status === 'closed';
 
@@ -148,7 +109,7 @@ export function ResumenJornadaScreen({ jornadaId }: ResumenJornadaScreenProps) {
               </div>
               <div className="text-body text-text-2 mt-2 font-medium">
                 {winnerStanding.g} {winnerStanding.g === 1 ? 'victoria' : 'victorias'} ·{' '}
-                {winnerStanding.gf} goles · {winnerStanding.pts} pts
+                {winnerStanding.gf} {winnerStanding.gf === 1 ? 'gol' : 'goles'} · {winnerStanding.pts} pts
               </div>
             </div>
           </div>
@@ -159,60 +120,7 @@ export function ResumenJornadaScreen({ jornadaId }: ResumenJornadaScreenProps) {
           <div className="text-caption uppercase tracking-wider text-text-2 font-semibold mb-2">
             Tabla
           </div>
-          <div className="bg-bg-elev border border-border rounded-card overflow-hidden">
-            <div
-              className="grid items-center px-3 h-9 text-caption font-mono uppercase text-text-3 tracking-wider border-b border-border"
-              style={{ gridTemplateColumns: '1.6fr repeat(6, 1fr)' }}
-            >
-              <span>Equipo</span>
-              <span className="text-center">PJ</span>
-              <span className="text-center">G</span>
-              <span className="text-center">E</span>
-              <span className="text-center">P</span>
-              <span className="text-center">Dif</span>
-              <span className="text-center">Pts</span>
-            </div>
-            {standings.map((row, idx) => {
-              const isWinner = winner?.id === row.team.id && row.pj > 0;
-              return (
-                <div
-                  key={row.team.id}
-                  className={cn(
-                    'grid items-center px-3 h-12 text-[13px] font-medium tnum border-t border-border',
-                    idx === 0 && 'border-t-0'
-                  )}
-                  style={{
-                    gridTemplateColumns: '1.6fr repeat(6, 1fr)',
-                    backgroundColor: isWinner ? softColor(row.team.color, 0.12) : undefined,
-                  }}
-                >
-                  <span className="flex items-center gap-2 min-w-0">
-                    <span
-                      className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: row.team.color }}
-                    />
-                    <span className="truncate">{row.team.name}</span>
-                  </span>
-                  <span className="text-center">{row.pj}</span>
-                  <span className="text-center">{row.g}</span>
-                  <span className="text-center">{row.e}</span>
-                  <span className="text-center">{row.p}</span>
-                  <span
-                    className={cn(
-                      'text-center',
-                      row.dif > 0 && 'text-success',
-                      row.dif < 0 && 'text-error',
-                      row.dif === 0 && 'text-text-2'
-                    )}
-                  >
-                    {row.dif > 0 ? '+' : ''}
-                    {row.dif}
-                  </span>
-                  <span className="text-center font-bold">{row.pts}</span>
-                </div>
-              );
-            })}
-          </div>
+          <StandingsTable rows={standings} highlightTeamId={winner?.id} />
         </section>
 
         {/* Top scorers */}
@@ -222,8 +130,8 @@ export function ResumenJornadaScreen({ jornadaId }: ResumenJornadaScreenProps) {
               Goleadores
             </div>
             <div className="bg-bg-elev border border-border rounded-card divide-y divide-border">
-              {topScorers.map((row, idx) => {
-                const medal = ['🥇', '🥈', '🥉'][idx] ?? `#${idx + 1}`;
+              {topScorers.map((row) => {
+                const medal = ['🥇', '🥈', '🥉'][row.rank - 1] ?? `#${row.rank}`;
                 return (
                   <div key={row.player.id} className="flex items-center gap-3 p-3">
                     <div className="relative">
@@ -358,6 +266,12 @@ export function ResumenJornadaScreen({ jornadaId }: ResumenJornadaScreenProps) {
         )}
       </div>
 
+      <ShareSheet
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        report={report}
+        fileStem={`miercoles-${jornada.date}`}
+      />
     </ScreenShell>
   );
 }

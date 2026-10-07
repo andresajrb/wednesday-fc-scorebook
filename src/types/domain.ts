@@ -1,13 +1,23 @@
 export type ID = string;
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const DEFAULT_MATCH_DURATION_SECONDS = 7 * 60;
+
+/** Una jornada se juega con 3 a 6 equipos: con 2 no hay rotación. */
+export const MIN_JORNADA_TEAMS = 3;
+export const MAX_JORNADA_TEAMS = 6;
+
+/** `guest`: equipo que viene a cubrir cuando uno fijo no puede. */
+export type TeamKind = 'fixed' | 'guest';
 
 export interface Team {
   id: ID;
   name: string;
   color: string;
+  kind: TeamKind;
+  /** Archivado: no aparece para jugar, pero su historial se conserva. */
+  archived: boolean;
   createdAt: string;
 }
 
@@ -65,6 +75,13 @@ export interface Jornada {
   id: ID;
   date: string;
   status: JornadaStatus;
+  /** Equipos que asisten, en orden de llegada (= orden inicial de la cola). */
+  teamIds: ID[];
+  /**
+   * Equipos que llegaron con la jornada en curso: cuántas partidas habían terminado
+   * cuando se sumaron. Entran a la cola detrás de los que ya esperaban.
+   */
+  lateJoins?: Record<ID, number>;
   notes?: string;
   createdAt: string;
   closedAt?: string;
@@ -75,6 +92,9 @@ export interface AppConfig {
   createdAt: string;
   autoAssignNextMatch: boolean;
   matchDurationSeconds: number;
+  soundEnabled: boolean;
+  vibrationEnabled: boolean;
+  keepScreenOn: boolean;
 }
 
 export interface AppState {
@@ -97,6 +117,7 @@ export interface BackupFile {
 export type Screen =
   | { name: 'onboarding' }
   | { name: 'home' }
+  | { name: 'jornada-setup' }
   | { name: 'team-detail'; teamId: ID }
   | { name: 'jornada-active'; jornadaId: ID }
   | { name: 'match-record'; matchId: ID }

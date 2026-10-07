@@ -1,14 +1,20 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type {
+  AppConfig,
   AppState,
   ID,
   Match,
   MatchRosterEntry,
   Screen,
   Team,
+  TeamKind,
 } from '@/types/domain';
-import { DEFAULT_MATCH_DURATION_SECONDS, SCHEMA_VERSION } from '@/types/domain';
+import {
+  DEFAULT_MATCH_DURATION_SECONDS,
+  MAX_JORNADA_TEAMS,
+  SCHEMA_VERSION,
+} from '@/types/domain';
 import {
   localforageStorage,
   clearStorage,
@@ -60,8 +66,11 @@ interface StoreActions {
   completeOnboarding(teams: Array<{ name: string; color: string }>): void;
 
   // Teams
+  createTeam(input: { name: string; color: string; kind: TeamKind }): ID;
   renameTeam(teamId: ID, name: string): void;
   setTeamColor(teamId: ID, hex: string): void;
+  setTeamKind(teamId: ID, kind: TeamKind): void;
+  setTeamArchived(teamId: ID, archived: boolean): void;
 
   // Players
   addPlayer(name: string, teamId: ID): ID;
@@ -70,7 +79,9 @@ interface StoreActions {
   renamePlayer(playerId: ID, name: string): void;
 
   // Jornadas
-  startJornada(): ID;
+  startJornada(teamIds: ID[]): ID;
+  addTeamToJornada(jornadaId: ID, teamId: ID): void;
+  removeTeamFromJornada(jornadaId: ID, teamId: ID): void;
   closeJornada(jornadaId: ID): void;
   reopenJornada(jornadaId: ID): void;
 
@@ -97,6 +108,9 @@ interface StoreActions {
   // Settings
   setAutoAssignNextMatch(value: boolean): void;
   setMatchDurationSeconds(value: number): void;
+  setAlertConfig(
+    patch: Partial<Pick<AppConfig, 'soundEnabled' | 'vibrationEnabled' | 'keepScreenOn'>>
+  ): void;
 
   // Edit
   reopenMatch(matchId: ID): void;
@@ -129,9 +143,23 @@ function makeInitialState(): AppState {
     config: {
       onboardingDone: false,
       createdAt: nowISO(),
-      autoAssignNextMatch: false,
+      autoAssignNextMatch: true,
       matchDurationSeconds: DEFAULT_MATCH_DURATION_SECONDS,
+      soundEnabled: true,
+      vibrationEnabled: true,
+      keepScreenOn: true,
     },
+  };
+}
+
+function makeTeam(input: { name: string; color: string; kind?: TeamKind }): Team {
+  return {
+    id: newId(),
+    name: input.name,
+    color: input.color,
+    kind: input.kind ?? 'fixed',
+    archived: false,
+    createdAt: nowISO(),
   };
 }
 
@@ -171,13 +199,13 @@ export const useStore = create<Store>()(
               if (input) teams[team.id] = { ...team, name: input.name, color: input.color };
             });
             for (const input of teamsInput.slice(ordered.length)) {
-              const id = newId();
-              teams[id] = { id, name: input.name, color: input.color, createdAt: nowISO() };
+              const team = makeTeam(input);
+              teams[team.id] = team;
             }
           } else {
-            for (const t of teamsInput) {
-              const id = newId();
-              teams[id] = { id, name: t.name, color: t.color, createdAt: nowISO() };
+            for (const input of teamsInput) {
+              const team = makeTeam(input);
+              teams[team.id] = team;
             }
           }
 
@@ -188,6 +216,32 @@ export const useStore = create<Store>()(
               config: { ...s.state.config, onboardingDone: true },
             },
             ui: { currentScreen: { name: 'home' }, history: [] },
+          };
+        }),
+
+      createTeam: (input) => {
+        const team = makeTeam({ ...input, name: input.name.trim() });
+        set((s) => ({
+          state: { ...s.state, teams: { ...s.state.teams, [team.id]: team } },
+        }));
+        return team.id;
+      },
+
+      setTeamKind: (teamId, kind) =>
+        set((s) => {
+          const team = s.state.teams[teamId];
+          if (!team) return s;
+          return {
+            state: { ...s.state, teams: { ...s.state.teams, [teamId]: { ...team, kind } } },
+          };
+        }),
+
+      setTeamArchived: (teamId, archived) =>
+        set((s) => {
+          const team = s.state.teams[teamId];
+          if (!team) return s;
+          return {
+            state: { ...s.state, teams: { ...s.state.teams, [teamId]: { ...team, archived } } },
           };
         }),
 
@@ -266,7 +320,7 @@ export const useStore = create<Store>()(
           },
         })),
 
-      startJornada: () => {
+      startJornada: (teamIds) => {
         const id = newId();
         const date = todayISODate();
         set((s) => ({
@@ -278,6 +332,7 @@ export const useStore = create<Store>()(
                 id,
                 date,
                 status: 'open',
+                teamIds: [...new Set(teamIds)].slice(0, MAX_JORNADA_TEAMS),
                 createdAt: nowISO(),
               },
             },
@@ -285,6 +340,63 @@ export const useStore = create<Store>()(
         }));
         return id;
       },
+
+      addTeamToJornada: (jornadaId, teamId) =>
+        set((s) => {
+          const j = s.state.jornadas[jornadaId];
+          if (!j || !s.state.teams[teamId] || j.teamIds.includes(teamId)) return s;
+          if (j.teamIds.length >= MAX_JORNADA_TEAMS) return s;
+          // Llega tarde: se forma detrás de los que ya esperaban al terminar la última
+          // partida. Si todavía no se jugó ninguna, es como si hubiera llegado a tiempo.
+          const finishedOrders = Object.values(s.state.matches)
+            .filter((m) => m.jornadaId === jornadaId && m.endedAt && m.result !== null)
+            .map((m) => m.order);
+          const after = finishedOrders.length > 0 ? Math.max(...finishedOrders) : 0;
+          const lateJoins = { ...(j.lateJoins ?? {}) };
+          if (after > 0) lateJoins[teamId] = after;
+          return {
+            state: {
+              ...s.state,
+              jornadas: {
+                ...s.state.jornadas,
+                [jornadaId]: {
+                  ...j,
+                  teamIds: [...j.teamIds, teamId],
+                  ...(Object.keys(lateJoins).length > 0 ? { lateJoins } : {}),
+                },
+              },
+            },
+          };
+        }),
+
+      removeTeamFromJornada: (jornadaId, teamId) =>
+        set((s) => {
+          const j = s.state.jornadas[jornadaId];
+          if (!j) return s;
+          // Solo se puede quitar a un equipo que no jugó: sacarlo después dejaría
+          // partidas de la tabla sin dueño.
+          const played = Object.values(s.state.matches).some(
+            (m) => m.jornadaId === jornadaId && (m.teamAId === teamId || m.teamBId === teamId)
+          );
+          if (played) return s;
+          const lateJoins = { ...(j.lateJoins ?? {}) };
+          delete lateJoins[teamId];
+          const { lateJoins: _omit, ...rest } = j;
+          void _omit;
+          return {
+            state: {
+              ...s.state,
+              jornadas: {
+                ...s.state.jornadas,
+                [jornadaId]: {
+                  ...rest,
+                  teamIds: j.teamIds.filter((t) => t !== teamId),
+                  ...(Object.keys(lateJoins).length > 0 ? { lateJoins } : {}),
+                },
+              },
+            },
+          };
+        }),
 
       closeJornada: (jornadaId) => {
         set((s) => {
@@ -480,6 +592,11 @@ export const useStore = create<Store>()(
           },
         })),
 
+      setAlertConfig: (patch) =>
+        set((s) => ({
+          state: { ...s.state, config: { ...s.state.config, ...patch } },
+        })),
+
       reopenMatch: (matchId) =>
         set((s) => {
           const m = s.state.matches[matchId];
@@ -528,6 +645,12 @@ export const useStore = create<Store>()(
       navigate: (screen, opts) =>
         set((s) => {
           if (opts?.replace) {
+            // Volver de una partida reemplaza la pantalla por la jornada, que ya está
+            // debajo en el historial: sin esto, "Volver" llevaba a la misma jornada.
+            const below = s.ui.history[s.ui.history.length - 1];
+            if (below && JSON.stringify(below.screen) === JSON.stringify(screen)) {
+              return { ui: { currentScreen: screen, history: s.ui.history.slice(0, -1) } };
+            }
             return { ui: { currentScreen: screen, history: s.ui.history } };
           }
           return {
@@ -649,6 +772,9 @@ function sanitizeUI(ui: StoreData['ui'] | undefined, state: AppState): StoreData
   })();
 
   if (!exists) return fallback;
+  if (screen.name === 'jornada-setup' && Object.values(state.jornadas).some((j) => j.status === 'open')) {
+    return fallback;
+  }
   if (screen.name === 'onboarding' && state.config.onboardingDone) return fallback;
   return { currentScreen: screen, history: [] };
 }

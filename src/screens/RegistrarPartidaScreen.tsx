@@ -18,6 +18,7 @@ import {
   getMatchGoalsOrdered,
 } from '@/store/selectors';
 import { lightenForText, readableTextColor, softColor } from '@/lib/colors';
+import { unlockAudio } from '@/lib/alerts';
 import { cn } from '@/lib/cn';
 import type { ID, MatchRosterEntry, Player } from '@/types/domain';
 
@@ -38,7 +39,6 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
   const addPlayer = useStore((s) => s.addPlayer);
   const startMatchClock = useStore((s) => s.startMatchClock);
 
-  const autoAssign = useStore((s) => s.state.config.autoAssignNextMatch);
   const matchDuration = useStore((s) => s.state.config.matchDurationSeconds);
 
   const match = state.matches[matchId];
@@ -174,14 +174,16 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
         (p) =>
           p.active &&
           p.teamId !== excludeTeamId &&
+          !state.teams[p.teamId]?.archived &&
           !currentRosterIds.has(p.id)
       )
       .sort((a, b) => a.name.localeCompare(b.name));
   };
 
   const onFinish = () => {
-    const isDraw = score.goalsA === score.goalsB;
-    if (isDraw && (isFirst || autoAssign)) {
+    // En un empate salen los dos. Después de la primera partida la cola sabe sola quién
+    // vuelve primero (el que venía ganando); en la primera nadie venía ganando.
+    if (score.goalsA === score.goalsB && isFirst) {
       setDrawDialog(true);
       return;
     }
@@ -295,7 +297,10 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
           <Button
             size="xl"
             leading={<Play size={20} strokeWidth={1.75} />}
-            onClick={() => startMatchClock(match.id)}
+            onClick={() => {
+              unlockAudio();
+              startMatchClock(match.id);
+            }}
           >
             Listo, empezar
           </Button>

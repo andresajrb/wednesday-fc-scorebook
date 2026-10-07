@@ -9,12 +9,17 @@ import { ConfirmDialog } from '@/components/primitives/ConfirmDialog';
 import { BallIcon } from '@/components/primitives/BallIcon';
 import { StickyBottomCTA } from '@/components/primitives/StickyBottomCTA';
 import { MatchCard } from '@/components/domain/MatchCard';
+import { JornadaQueueCard } from '@/components/domain/JornadaQueueCard';
+import { JornadaTeamsSheet } from '@/components/domain/JornadaTeamsSheet';
+import { LiveStandings } from '@/components/domain/LiveStandings';
 import { useStore } from '@/store/useStore';
 import {
   getMatchesForJornada,
   getMatchScore,
   getGoalsByPlayerForMatch,
   getUnassignedGoalsForMatch,
+  getJornadaQueue,
+  getJornadaTeams,
   predictNextMatch,
 } from '@/store/selectors';
 import { formatDayShort } from '@/lib/format';
@@ -35,7 +40,7 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
 
   const jornada = state.jornadas[jornadaId];
   const matches = jornada ? getMatchesForJornada(state, jornadaId) : [];
-  const teams = Object.values(state.teams);
+  const teams = jornada ? getJornadaTeams(state, jornadaId) : [];
   const inProgress = matches.find((m) => m.result === null);
 
   const autoAssign = useStore((s) => s.state.config.autoAssignNextMatch);
@@ -50,10 +55,12 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
   const [matchMenuId, setMatchMenuId] = useState<ID | null>(null);
   const [confirmDeleteMatchId, setConfirmDeleteMatchId] = useState<ID | null>(null);
   const [confirmReopenMatchId, setConfirmReopenMatchId] = useState<ID | null>(null);
+  const [teamsSheetOpen, setTeamsSheetOpen] = useState(false);
 
   const menuMatch = matchMenuId ? state.matches[matchMenuId] : null;
 
   const prediction = jornada ? predictNextMatch(state, jornadaId) : null;
+  const queue = jornada ? getJornadaQueue(state, jornadaId) : null;
 
   if (!jornada) {
     return (
@@ -161,9 +168,32 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
 
       <div className="px-4 pt-3 pb-2">
         <div className="text-[28px] font-bold tracking-tight leading-none">
-          {playedCount} <span className="text-text-2 text-body font-normal">partidas jugadas</span>
+          {playedCount}{' '}
+          <span className="text-text-2 text-body font-normal">
+            {playedCount === 1 ? 'partida jugada' : 'partidas jugadas'}
+          </span>
         </div>
       </div>
+
+      {!closed && queue && (
+        <div className="px-4 pb-2">
+          <JornadaQueueCard
+            queue={queue}
+            prediction={prediction}
+            showQueue={autoAssign}
+            jornadaTeams={teams}
+            teams={state.teams}
+            teamCount={teams.length}
+            onManageTeams={() => setTeamsSheetOpen(true)}
+          />
+        </div>
+      )}
+
+      {playedCount > 0 && (
+        <div className="px-4">
+          <LiveStandings jornadaId={jornadaId} />
+        </div>
+      )}
 
       <div className="flex-1 px-4 pb-4 space-y-2.5 overflow-auto">
         {matches.length === 0 ? (
@@ -326,7 +356,7 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
             </div>
             <p className="text-caption text-text-2 leading-relaxed">
               {prediction.reason}
-              {!prediction.certain && ' Confirma o cambia manualmente si no es correcto.'}
+              {' Confirma o cambia manualmente si no es correcto.'}
             </p>
             <div className="space-y-2">
               <Button
@@ -469,6 +499,11 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
         </div>
       </BottomSheet>
 
+      <JornadaTeamsSheet
+        open={teamsSheetOpen}
+        onClose={() => setTeamsSheetOpen(false)}
+        jornadaId={jornadaId}
+      />
     </ScreenShell>
   );
 }

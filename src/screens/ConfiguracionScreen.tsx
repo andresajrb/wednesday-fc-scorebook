@@ -7,6 +7,8 @@ import {
   ChevronRight,
   History,
   Smartphone,
+  ArchiveRestore,
+  Volume2,
 } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { Header } from '@/components/primitives/Header';
@@ -17,6 +19,8 @@ import { BottomSheet } from '@/components/primitives/BottomSheet';
 import { ToggleSwitch } from '@/components/primitives/ToggleSwitch';
 import { TeamSwatch } from '@/components/domain/TeamSwatch';
 import { useStore } from '@/store/useStore';
+import { getSortedTeams } from '@/store/selectors';
+import { playTestAlert } from '@/lib/alerts';
 import { downloadBackup, downloadBackupFile, readBackupFile, BackupError } from '@/lib/backup';
 import { COLOR_SWATCHES } from '@/lib/colors';
 import { formatBytes, readStorageHealth, type StorageHealth } from '@/lib/storage-health';
@@ -37,6 +41,8 @@ export function ConfiguracionScreen() {
   const setTeamColor = useStore((s) => s.setTeamColor);
   const setAutoAssignNextMatch = useStore((s) => s.setAutoAssignNextMatch);
   const setMatchDurationSeconds = useStore((s) => s.setMatchDurationSeconds);
+  const setAlertConfig = useStore((s) => s.setAlertConfig);
+  const setTeamArchived = useStore((s) => s.setTeamArchived);
   const replaceState = useStore((s) => s.replaceState);
   const resetAll = useStore((s) => s.resetAll);
 
@@ -101,7 +107,8 @@ export function ConfiguracionScreen() {
     }
   };
 
-  const teams = Object.values(state.teams);
+  const teams = getSortedTeams(state);
+  const archivedTeams = Object.values(state.teams).filter((t) => t.archived);
 
   const onPickFile = async (file: File | null) => {
     if (!file) return;
@@ -160,7 +167,7 @@ export function ConfiguracionScreen() {
                 />
                 <div className="flex-1 min-w-0">
                   <label className="block text-caption text-text-3 uppercase tracking-wide leading-none mb-1">
-                    Equipo {idx + 1}
+                    {t.kind === 'guest' ? 'Invitado' : 'Equipo'}
                   </label>
                   <input
                     className="w-full bg-transparent outline-none text-body-em font-bold"
@@ -174,6 +181,36 @@ export function ConfiguracionScreen() {
           </div>
         </section>
 
+        {archivedTeams.length > 0 && (
+          <section>
+            <div className="text-caption uppercase tracking-wider text-text-2 font-semibold mb-2">
+              Equipos archivados
+            </div>
+            <div className="bg-bg-elev border border-border rounded-card overflow-hidden">
+              {archivedTeams.map((t, idx) => (
+                <div
+                  key={t.id}
+                  className={`flex items-center gap-3 p-3 ${idx > 0 ? 'border-t border-border' : ''}`}
+                >
+                  <span
+                    className="w-4 h-4 rounded-full flex-shrink-0 opacity-60"
+                    style={{ backgroundColor: t.color }}
+                  />
+                  <span className="flex-1 min-w-0 truncate text-body-em text-text-2">{t.name}</span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    leading={<ArchiveRestore size={14} strokeWidth={1.75} />}
+                    onClick={() => setTeamArchived(t.id, false)}
+                  >
+                    Restaurar
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         <section>
           <div className="text-caption uppercase tracking-wider text-text-2 font-semibold mb-2">
             Reglas
@@ -183,8 +220,9 @@ export function ConfiguracionScreen() {
               <div className="flex-1 min-w-0">
                 <div className="text-body-em font-semibold">Asignación automática de encuentros</div>
                 <div className="text-caption text-text-2 mt-1 leading-relaxed">
-                  La app predice el próximo enfrentamiento siguiendo la regla "el que pierde sale".
-                  Usa los últimos 3 partidos para mantenerse fresca.
+                  La app predice el próximo enfrentamiento siguiendo la regla "el que pierde sale"
+                  y muestra la seguidilla. Usa las últimas partidas para mantenerse fresca (3 con 4
+                  equipos; una más por cada equipo extra).
                 </div>
               </div>
               <ToggleSwitch
@@ -216,6 +254,50 @@ export function ConfiguracionScreen() {
                 />
                 <span className="text-caption text-text-2">min</span>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div className="text-caption uppercase tracking-wider text-text-2 font-semibold mb-2">
+            Avisos de tiempo
+          </div>
+          <div className="bg-bg-elev border border-border rounded-card overflow-hidden">
+            <AlertToggle
+              title="Bocina"
+              description="Suena al entrar al último minuto y al terminar el tiempo. En iPhone no suena con el modo silencio activado."
+              checked={state.config.soundEnabled}
+              onChange={(v) => setAlertConfig({ soundEnabled: v })}
+            />
+            <AlertToggle
+              title="Vibración"
+              description="Vibra junto con la bocina. No disponible en iPhone."
+              checked={state.config.vibrationEnabled}
+              onChange={(v) => setAlertConfig({ vibrationEnabled: v })}
+              bordered
+            />
+            <AlertToggle
+              title="Pantalla siempre encendida"
+              description="Evita que el teléfono se bloquee mientras corre el reloj."
+              checked={state.config.keepScreenOn}
+              onChange={(v) => setAlertConfig({ keepScreenOn: v })}
+              bordered
+            />
+            <div className="p-3 border-t border-border">
+              <Button
+                variant="secondary"
+                size="md"
+                fullWidth
+                leading={<Volume2 size={16} strokeWidth={1.75} />}
+                onClick={() =>
+                  playTestAlert({
+                    sound: state.config.soundEnabled,
+                    vibration: state.config.vibrationEnabled,
+                  })
+                }
+              >
+                Probar aviso
+              </Button>
             </div>
           </div>
         </section>
@@ -530,6 +612,30 @@ function InfoRow({ label, value }: { label: string; value: string }) {
     <div className="flex items-center gap-3 p-3 border-t border-border first:border-t-0">
       <span className="flex-1 text-body text-text-2">{label}</span>
       <span className="text-body font-mono text-text font-medium">{value}</span>
+    </div>
+  );
+}
+
+function AlertToggle({
+  title,
+  description,
+  checked,
+  onChange,
+  bordered,
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  bordered?: boolean;
+}) {
+  return (
+    <div className={`p-3 flex items-start gap-3 ${bordered ? 'border-t border-border' : ''}`}>
+      <div className="flex-1 min-w-0">
+        <div className="text-body-em font-semibold">{title}</div>
+        <div className="text-caption text-text-2 mt-1 leading-relaxed">{description}</div>
+      </div>
+      <ToggleSwitch checked={checked} onChange={onChange} ariaLabel={title} />
     </div>
   );
 }

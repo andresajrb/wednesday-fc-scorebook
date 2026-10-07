@@ -1,9 +1,11 @@
-import { Settings, Play, ArrowRight, Trophy, ChevronRight } from 'lucide-react';
+import { useState } from 'react';
+import { Settings, Play, ArrowRight, Trophy, ChevronRight, Plus } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { Button } from '@/components/primitives/Button';
 import { IconButton } from '@/components/primitives/IconButton';
 import { Logo } from '@/components/primitives/Logo';
 import { TeamCard } from '@/components/domain/TeamCard';
+import { TeamFormSheet } from '@/components/domain/TeamFormSheet';
 import { useStore } from '@/store/useStore';
 import {
   getOpenJornada,
@@ -11,6 +13,7 @@ import {
   getClosedJornadasDesc,
   getJornadaWinnerTeam,
   getMatchesForJornada,
+  getSortedTeams,
 } from '@/store/selectors';
 import { formatDayShort, formatRelative } from '@/lib/format';
 import { softColor, lightenForText } from '@/lib/colors';
@@ -18,17 +21,16 @@ import { softColor, lightenForText } from '@/lib/colors';
 export function HomeScreen() {
   const state = useStore((s) => s.state);
   const navigate = useStore((s) => s.navigate);
-  const startJornada = useStore((s) => s.startJornada);
   const open = getOpenJornada(state);
-  const teams = Object.values(state.teams);
+  const teams = getSortedTeams(state);
+  const [creatingTeam, setCreatingTeam] = useState(false);
   const closed = getClosedJornadasDesc(state).slice(0, 5);
 
   const onStartOrContinue = () => {
     if (open) {
       navigate({ name: 'jornada-active', jornadaId: open.id });
     } else {
-      const id = startJornada();
-      navigate({ name: 'jornada-active', jornadaId: id });
+      navigate({ name: 'jornada-setup' });
     }
   };
 
@@ -96,9 +98,18 @@ export function HomeScreen() {
                 name={t.name}
                 color={t.color}
                 playerCount={getActivePlayersByTeam(state, t.id).length}
+                guest={t.kind === 'guest'}
                 onClick={() => navigate({ name: 'team-detail', teamId: t.id })}
               />
             ))}
+            <button
+              type="button"
+              onClick={() => setCreatingTeam(true)}
+              className="aspect-[1.05/1] flex flex-col items-center justify-center gap-2 p-3.5 rounded-card border border-dashed border-border-strong text-text-2 active:scale-[0.98] transition-transform"
+            >
+              <Plus size={22} strokeWidth={1.75} />
+              <span className="text-body-em font-medium">Nuevo equipo</span>
+            </button>
           </div>
         </section>
 
@@ -143,6 +154,7 @@ export function HomeScreen() {
           )}
         </section>
       </div>
+      <TeamFormSheet open={creatingTeam} onClose={() => setCreatingTeam(false)} />
     </ScreenShell>
   );
 }

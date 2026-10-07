@@ -134,7 +134,14 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
     const name = str(t.name);
     const color = str(t.color);
     if (!id || !name || !color) return null;
-    return { id, name, color, createdAt: str(t.createdAt) ?? new Date(0).toISOString() };
+    return {
+      id,
+      name,
+      color,
+      kind: t.kind === 'guest' ? 'guest' : 'fixed',
+      archived: t.archived === true,
+      createdAt: str(t.createdAt) ?? new Date(0).toISOString(),
+    };
   });
 
   const teamIds = Object.keys(teams);
@@ -167,14 +174,28 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
     };
   });
 
+  // Jornadas de antes de v5 (sin lista de equipos): en una abierta jugaban todos.
+  const legacyOpenJornadas = new Set<ID>();
   const jornadas = records<Jornada>(source.jornadas, (j) => {
     const id = str(j.id);
     const date = str(j.date);
     if (!id || !date) return null;
+    if (!Array.isArray(j.teamIds) && j.status !== 'closed') legacyOpenJornadas.add(id);
+    const teamIds = Array.isArray(j.teamIds)
+      ? j.teamIds.filter((t): t is string => typeof t === 'string' && !!teams[t])
+      : [];
+    const lateJoins: Record<ID, number> = {};
+    if (isObj(j.lateJoins)) {
+      for (const [teamId, after] of Object.entries(j.lateJoins)) {
+        if (teamIds.includes(teamId) && typeof after === 'number') lateJoins[teamId] = after;
+      }
+    }
     return {
       id,
       date,
       status: j.status === 'closed' ? 'closed' : 'open',
+      teamIds,
+      ...(Object.keys(lateJoins).length > 0 ? { lateJoins } : {}),
       notes: typeof j.notes === 'string' ? j.notes : undefined,
       createdAt: str(j.createdAt) ?? new Date(0).toISOString(),
       closedAt: str(j.closedAt) ?? undefined,
@@ -228,6 +249,20 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
     };
   });
 
+  // Una jornada sin equipos legibles se reconstruye con los que jugaron sus partidas.
+  for (const jornada of Object.values(jornadas)) {
+    const played = Object.values(matches)
+      .filter((m) => m.jornadaId === jornada.id)
+      .sort((a, b) => a.order - b.order)
+      .flatMap((m) => [m.teamAId, m.teamBId]);
+    for (const t of played) if (!jornada.teamIds.includes(t)) jornada.teamIds.push(t);
+    if (jornada.teamIds.length === 0 || legacyOpenJornadas.has(jornada.id)) {
+      for (const t of teamIds) {
+        if (!teams[t].archived && !jornada.teamIds.includes(t)) jornada.teamIds.push(t);
+      }
+    }
+  }
+
   let droppedGoals = 0;
   const goals = records<Goal>(source.goals, (g) => {
     const id = str(g.id);
@@ -269,6 +304,9 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
         typeof configSource.matchDurationSeconds === 'number'
           ? configSource.matchDurationSeconds
           : DEFAULT_MATCH_DURATION_SECONDS,
+      soundEnabled: configSource.soundEnabled !== false,
+      vibrationEnabled: configSource.vibrationEnabled !== false,
+      keepScreenOn: configSource.keepScreenOn !== false,
     },
   };
 

@@ -9,6 +9,8 @@ import {
   User,
   Pencil,
   Check,
+  Archive,
+  ArchiveRestore,
 } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { Header } from '@/components/primitives/Header';
@@ -16,10 +18,14 @@ import { IconButton } from '@/components/primitives/IconButton';
 import { BottomSheet } from '@/components/primitives/BottomSheet';
 import { Avatar } from '@/components/primitives/Avatar';
 import { TeamSwatch } from '@/components/domain/TeamSwatch';
+import { KindOption } from '@/components/domain/TeamFormSheet';
+import { Button } from '@/components/primitives/Button';
+import { ConfirmDialog } from '@/components/primitives/ConfirmDialog';
 import { useStore } from '@/store/useStore';
 import {
   getActivePlayersByTeam,
   getInactivePlayersByTeam,
+  getOpenJornada,
 } from '@/store/selectors';
 import type { ID, Player } from '@/types/domain';
 import { COLOR_SWATCHES, softColor, lightenForText, readableTextColor } from '@/lib/colors';
@@ -40,6 +46,9 @@ export function DetalleEquipoScreen({ teamId }: DetalleEquipoScreenProps) {
   const movePlayer = useStore((s) => s.movePlayer);
   const setPlayerActive = useStore((s) => s.setPlayerActive);
   const renamePlayer = useStore((s) => s.renamePlayer);
+  const setTeamKind = useStore((s) => s.setTeamKind);
+  const setTeamArchived = useStore((s) => s.setTeamArchived);
+  const [archiveOpen, setArchiveOpen] = useState(false);
 
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState(team?.name ?? '');
@@ -69,7 +78,9 @@ export function DetalleEquipoScreen({ teamId }: DetalleEquipoScreenProps) {
 
   const active = getActivePlayersByTeam(state, teamId);
   const inactive = getInactivePlayersByTeam(state, teamId);
-  const otherTeams = Object.values(teams).filter((t) => t.id !== teamId);
+  const otherTeams = Object.values(teams).filter((t) => t.id !== teamId && !t.archived);
+  const openJornada = getOpenJornada(state);
+  const inOpenJornada = !!openJornada?.teamIds.includes(teamId);
 
   const commitName = () => {
     if (draftName.trim() && draftName.trim() !== team.name) {
@@ -159,7 +170,7 @@ export function DetalleEquipoScreen({ teamId }: DetalleEquipoScreenProps) {
               className="text-caption uppercase tracking-wider font-semibold"
               style={{ color: lightenForText(team.color) }}
             >
-              Equipo
+              {team.archived ? 'Archivado' : team.kind === 'guest' ? 'Invitado' : 'Equipo'}
             </div>
             <div className="text-[20px] font-bold tracking-tight truncate">{team.name}</div>
             <div className="text-caption text-text-2">
@@ -184,6 +195,26 @@ export function DetalleEquipoScreen({ teamId }: DetalleEquipoScreenProps) {
                 ariaLabel={`Color ${c}`}
               />
             ))}
+          </div>
+        </section>
+
+        <section>
+          <div className="text-caption uppercase tracking-wider text-text-2 font-semibold mb-2">
+            Tipo
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <KindOption
+              selected={team.kind === 'fixed'}
+              onClick={() => setTeamKind(team.id, 'fixed')}
+              title="Fijo"
+              description="Juega todas las semanas"
+            />
+            <KindOption
+              selected={team.kind === 'guest'}
+              onClick={() => setTeamKind(team.id, 'guest')}
+              title="Invitado"
+              description="Cubre cuando falta uno"
+            />
           </div>
         </section>
 
@@ -322,7 +353,52 @@ export function DetalleEquipoScreen({ teamId }: DetalleEquipoScreenProps) {
             )}
           </section>
         )}
+
+        <section className="pt-2">
+          {team.archived ? (
+            <Button
+              variant="secondary"
+              size="lg"
+              fullWidth
+              leading={<ArchiveRestore size={18} strokeWidth={1.75} />}
+              onClick={() => setTeamArchived(team.id, false)}
+            >
+              Restaurar equipo
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant="ghost"
+                size="lg"
+                fullWidth
+                disabled={inOpenJornada}
+                leading={<Archive size={18} strokeWidth={1.75} />}
+                onClick={() => setArchiveOpen(true)}
+              >
+                Archivar equipo
+              </Button>
+              <p className="text-caption text-text-3 mt-1 text-center leading-relaxed">
+                {inOpenJornada
+                  ? 'Está jugando la jornada en curso: no se puede archivar ahora.'
+                  : 'Deja de aparecer para jugar. Su historial y sus jugadores se conservan.'}
+              </p>
+            </>
+          )}
+        </section>
       </div>
+
+      <ConfirmDialog
+        open={archiveOpen}
+        title={`Archivar ${team.name}`}
+        description="No aparecerá al armar jornadas ni en el inicio. Puedes restaurarlo desde Configuración cuando quieras."
+        confirmLabel="Archivar"
+        onConfirm={() => {
+          setTeamArchived(team.id, true);
+          setArchiveOpen(false);
+          back();
+        }}
+        onCancel={() => setArchiveOpen(false)}
+      />
 
       <BottomSheet
         open={!!actionPlayer}

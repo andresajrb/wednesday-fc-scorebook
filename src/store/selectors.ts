@@ -50,6 +50,34 @@ export function getMatchGoalsOrdered(state: AppState, matchId: ID): Goal[] {
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
+/** Equipos registrados para jugar: fijos primero, después invitados, por antigüedad. */
+export function getSortedTeams(
+  state: AppState,
+  opts: { includeArchived?: boolean } = {}
+): Team[] {
+  return Object.values(state.teams)
+    .filter((t) => opts.includeArchived || !t.archived)
+    .sort(
+      (a, b) =>
+        (a.kind === 'guest' ? 1 : 0) - (b.kind === 'guest' ? 1 : 0) ||
+        a.createdAt.localeCompare(b.createdAt)
+    );
+}
+
+/**
+ * Equipos que participan de la jornada, en orden de llegada. Incluye también a los
+ * que jugaron alguna partida aunque ya no figuren en la lista, para no dejar partidas
+ * huérfanas en la tabla.
+ */
+export function getJornadaTeams(state: AppState, jornadaId: ID): Team[] {
+  const jornada = state.jornadas[jornadaId];
+  const ids = [...(jornada?.teamIds ?? [])];
+  for (const m of getMatchesForJornada(state, jornadaId)) {
+    for (const t of [m.teamAId, m.teamBId]) if (!ids.includes(t)) ids.push(t);
+  }
+  return ids.map((id) => state.teams[id]).filter((t): t is Team => !!t);
+}
+
 export function getMatchesForJornada(state: AppState, jornadaId: ID): Match[] {
   return Object.values(state.matches)
     .filter((m) => m.jornadaId === jornadaId)
@@ -73,7 +101,7 @@ export function getStandings(state: AppState, jornadaId: ID): TeamStandingRow[] 
     (m) => m.result !== null && m.endedAt
   );
   const rows = new Map<ID, TeamStandingRow>();
-  for (const team of Object.values(state.teams)) {
+  for (const team of getJornadaTeams(state, jornadaId)) {
     rows.set(team.id, {
       team,
       pj: 0,
@@ -180,131 +208,174 @@ export function getClosedJornadasDesc(state: AppState): Jornada[] {
     .sort((a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? ''));
 }
 
+export const PREDICTION_WINDOW = 3;
+
+/**
+ * Cuántas partidas recientes mira la predicción. Con 4 equipos son 3 (las últimas 3
+ * partidas alcanzan para ver a todos); con más equipos crece lo justo para que
+ * todos puedan aparecer: N equipos necesitan N - 1 partidas.
+ */
+export function predictionWindowSize(teamCount: number): number {
+  return Math.max(PREDICTION_WINDOW, teamCount - 1);
+}
+
+export interface JornadaQueue {
+  /** Partida sin terminar, si la hay. */
+  inProgress: Match | null;
+  /** Ganador de la última partida terminada: se queda en cancha. */
+  staying: ID[];
+  /**
+   * Equipos que no aparecen en la ventana: van antes que `queue`, pero su orden entre
+   * ellos no se conoce.
+   */
+  unseen: ID[];
+  /** Equipos que salieron dentro de la ventana, en el orden en que vuelven a entrar. */
+  queue: ID[];
+  /** Partidas terminadas de la jornada. */
+  finishedCount: number;
+}
+
+/**
+ * Cola de la jornada según la regla del juego, mirando solo las últimas partidas
+ * (ventana deslizante): así un error viejo no contamina la predicción.
+ *
+ * - El que pierde sale al final de la cola; el ganador se queda.
+ * - Empate: salen los dos; vuelve primero el que venía ganando (en la primera partida,
+ *   el elegido en `drawWinnerNext`).
+ * - Un equipo que llegó tarde se forma al final de la cola, detrás de los que ya esperaban.
+ *
+ * Cola lógica = `unseen` (no jugaron dentro de la ventana, adelante y sin orden conocido)
+ * seguido de `queue` (salieron dentro de la ventana, en orden). Cada partida de la
+ * ventana revela qué equipo de `unseen` entró.
+ */
+export function getJornadaQueue(state: AppState, jornadaId: ID): JornadaQueue {
+  const jornada = state.jornadas[jornadaId];
+  const all = getMatchesForJornada(state, jornadaId);
+  const finished = all.filter((m) => m.endedAt && m.result !== null);
+  const inProgress = all.find((m) => m.result === null) ?? null;
+  const teamIds = (jornada?.teamIds ?? []).filter((t) => !!state.teams[t]);
+  const lateJoins = jornada?.lateJoins ?? {};
+
+  const window = finished.slice(-predictionWindowSize(teamIds.length));
+  let unseen: ID[];
+  let queue: ID[] = [];
+  let staying: ID[] = [];
+
+  if (window.length === 0) {
+    unseen = [...teamIds];
+  } else {
+    const first = window[0];
+    // Los que llegaron tarde después de empezar la ventana tienen lugar conocido: al final.
+    const joinedInWindow = (t: ID) => lateJoins[t] !== undefined && lateJoins[t] >= first.order;
+    const late = teamIds.filter(joinedInWindow).sort((a, b) => lateJoins[a] - lateJoins[b]);
+    unseen = teamIds.filter((t) => !joinedInWindow(t));
+
+    // Quién venía ganando antes de la ventana, para resolver un empate en su primera partida.
+    const before = finished[finished.length - window.length - 1];
+    if (before?.result === 'A') staying = [before.teamAId];
+    else if (before?.result === 'B') staying = [before.teamBId];
+
+    const take = (t: ID) => {
+      unseen = unseen.filter((x) => x !== t);
+      queue = queue.filter((x) => x !== t);
+    };
+
+    for (const m of window) {
+      for (const t of [m.teamAId, m.teamBId]) if (!staying.includes(t)) take(t);
+      if (m.result === 'A') {
+        staying = [m.teamAId];
+        queue.push(m.teamBId);
+      } else if (m.result === 'B') {
+        staying = [m.teamBId];
+        queue.push(m.teamAId);
+      } else {
+        const defaultFirst = staying.includes(m.teamBId) ? m.teamBId : m.teamAId;
+        const firstOut =
+          m.drawWinnerNext === m.teamAId || m.drawWinnerNext === m.teamBId
+            ? m.drawWinnerNext
+            : defaultFirst;
+        const secondOut = firstOut === m.teamAId ? m.teamBId : m.teamAId;
+        staying = [];
+        queue.push(firstOut, secondOut);
+      }
+      while (late.length > 0 && lateJoins[late[0]] <= m.order) {
+        const t = late.shift()!;
+        if (!queue.includes(t) && !staying.includes(t)) queue.push(t);
+      }
+    }
+    for (const t of late) if (!queue.includes(t)) queue.push(t);
+  }
+
+  // Solo cuentan los equipos que siguen en la jornada.
+  const inJornada = (t: ID) => teamIds.includes(t);
+  unseen = unseen.filter(inJornada);
+  queue = queue.filter(inJornada);
+  staying = staying.filter(inJornada);
+
+  if (inProgress) {
+    const onCourt = [inProgress.teamAId, inProgress.teamBId];
+    return {
+      inProgress,
+      staying: [],
+      unseen: unseen.filter((t) => !onCourt.includes(t)),
+      queue: queue.filter((t) => !onCourt.includes(t)),
+      finishedCount: finished.length,
+    };
+  }
+  return {
+    inProgress: null,
+    staying,
+    unseen: unseen.filter((t) => !staying.includes(t)),
+    queue: queue.filter((t) => !staying.includes(t)),
+    finishedCount: finished.length,
+  };
+}
+
 export interface NextMatchPrediction {
   teamAId: ID;
   teamBId: ID;
   reason: string;
-  certain: boolean;
 }
 
-export const PREDICTION_WINDOW = 3;
-
 /**
- * Predice cuál es el siguiente enfrentamiento siguiendo las reglas del juego.
- * Usa solo los últimos `PREDICTION_WINDOW` matches terminados como ventana
- * deslizante, así errores antiguos en la cola no contaminan futuras predicciones.
- *
- * - El que pierde sale al final de la cola; el ganador se queda y entra el siguiente.
- * - Empate: ambos salen al final de la cola (con `drawWinnerNext` definiendo cuál
- *   entrará antes), y entran los 2 primeros de la cola previa.
- *
- * Modelo de cola lógica = `unseen` (equipos que aún no han jugado en la ventana,
- * frente) concatenado con `queue` (equipos que ya jugaron y volvieron a esperar,
- * fondo). Durante la simulación, mira el match siguiente para descubrir cuál
- * equipo de `unseen` entró (revelando su orden).
+ * Próximo enfrentamiento según la cola: el ganador de la última partida contra el
+ * siguiente, o los dos siguientes si no hay ganador (empate).
  *
  * Devuelve null si:
- * - No hay partidas terminadas (no hay info).
- * - Quedan ≥2 equipos sin jugar dentro de la ventana y se necesitan para llenar
- *   el próximo match.
+ * - No hay partidas terminadas: la primera se elige a mano.
+ * - Hay una partida en curso.
+ * - Hacen falta equipos de `unseen` y hay más de uno: no se sabe cuál sigue.
  */
-export function predictNextMatch(
-  state: AppState,
-  jornadaId: ID
-): NextMatchPrediction | null {
-  const allFinished = getMatchesForJornada(state, jornadaId)
-    .filter((m) => m.endedAt && m.result !== null)
-    .sort((a, b) => a.order - b.order);
-  if (allFinished.length === 0) return null;
-  // Ventana deslizante: solo los últimos N matches.
-  const matches = allFinished.slice(-PREDICTION_WINDOW);
+export function predictNextMatch(state: AppState, jornadaId: ID): NextMatchPrediction | null {
+  const { inProgress, staying, unseen, queue, finishedCount } = getJornadaQueue(state, jornadaId);
+  if (inProgress || finishedCount === 0) return null;
 
-  const allTeamIds = Object.values(state.teams).map((t) => t.id);
-  const initialOnCourt = [matches[0].teamAId, matches[0].teamBId];
-  let onCourt: ID[] = [...initialOnCourt];
-  let queue: ID[] = [];
-  let unseen: ID[] = allTeamIds.filter((t) => !initialOnCourt.includes(t));
-
-  const removeFromCola = (teamId: ID): void => {
-    const ui = unseen.indexOf(teamId);
-    if (ui >= 0) {
-      unseen.splice(ui, 1);
-      return;
-    }
-    const qi = queue.indexOf(teamId);
-    if (qi >= 0) queue.splice(qi, 1);
-  };
-
-  const computeOutgoing = (m: Match): ID[] => {
-    if (m.result === 'A') return [m.teamBId];
-    if (m.result === 'B') return [m.teamAId];
-    if (m.result === 'draw') {
-      const firstOut = m.drawWinnerNext ?? m.teamAId;
-      const secondOut = firstOut === m.teamAId ? m.teamBId : m.teamAId;
-      return [firstOut, secondOut];
-    }
-    return [];
-  };
-
-  const computeStaying = (m: Match): ID[] => {
-    if (m.result === 'A') return [m.teamAId];
-    if (m.result === 'B') return [m.teamBId];
-    return [];
-  };
-
-  for (let i = 0; i < matches.length - 1; i++) {
-    const m = matches[i];
-    const next = matches[i + 1];
-    const staying = computeStaying(m);
-    const outgoing = computeOutgoing(m);
-    // Determinar quiénes entran en el próximo match: los del next que no estaban quedándose.
-    const incoming = [next.teamAId, next.teamBId].filter((t) => !staying.includes(t));
-    // Actualizar cola: removemos los `incoming` de unseen/queue (revelando su orden), y
-    // añadimos `outgoing` al final.
-    for (const t of incoming) removeFromCola(t);
-    queue = queue.concat(outgoing);
-    onCourt = [...staying, ...incoming];
-  }
-
-  // Procesar el ÚLTIMO match: solo aplicamos el "outgoing" después de calcular los
-  // próximos retadores, para no contaminar la cola con equipos que acaban de salir.
-  const last = matches[matches.length - 1];
-  const lastStaying = computeStaying(last);
-  const lastOutgoing = computeOutgoing(last);
-
-  // Próximo match: lo que queda en cancha = lastStaying. Faltan retadores.
+  const pendingUnseen = [...unseen];
+  const pendingQueue = [...queue];
   const challengers: ID[] = [];
-  const need = 2 - lastStaying.length;
-  for (let k = 0; k < need; k++) {
-    if (unseen.length > 0) {
-      if (unseen.length > 1) return null;
-      challengers.push(unseen.shift()!);
-    } else if (queue.length > 0) {
-      challengers.push(queue.shift()!);
+  for (let k = 0; k < 2 - staying.length; k++) {
+    if (pendingUnseen.length > 0) {
+      if (pendingUnseen.length > 1) return null;
+      challengers.push(pendingUnseen.shift()!);
+    } else if (pendingQueue.length > 0) {
+      challengers.push(pendingQueue.shift()!);
     } else {
       return null;
     }
   }
-
-  // Empujamos los outgoing al final de queue (ya hicimos la predicción).
-  queue.push(...lastOutgoing);
-
-  onCourt = [...lastStaying, ...challengers];
+  const onCourt = [...staying, ...challengers];
   if (onCourt.length < 2) return null;
 
   let reason: string;
-  if (last.result === 'draw') {
+  if (staying.length === 0) {
     reason = 'Empate anterior. Entran los 2 primeros en cola.';
   } else {
-    const winnerId = lastStaying[0];
-    const winnerName = state.teams[winnerId]?.name ?? 'Ganador';
+    const winnerName = state.teams[staying[0]]?.name ?? 'Ganador';
     reason = `${winnerName} se queda. Entra el siguiente en cola.`;
   }
-
   return {
     teamAId: onCourt[0],
     teamBId: onCourt[1],
     reason,
-    certain: unseen.length === 0,
   };
 }

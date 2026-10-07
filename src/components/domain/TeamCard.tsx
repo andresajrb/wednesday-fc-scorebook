@@ -6,11 +6,12 @@ interface TeamCardProps {
   name: string;
   color: string;
   playerCount: number;
+  guest?: boolean;
   onClick?: () => void;
   className?: string;
 }
 
-export function TeamCard({ name, color, playerCount, onClick, className }: TeamCardProps) {
+export function TeamCard({ name, color, playerCount, guest, onClick, className }: TeamCardProps) {
   const textColor = lightenForText(color);
   return (
     <button
@@ -37,7 +38,7 @@ export function TeamCard({ name, color, playerCount, onClick, className }: TeamC
           className="text-caption uppercase tracking-wide font-semibold mb-1"
           style={{ color: textColor }}
         >
-          Equipo
+          {guest ? 'Invitado' : 'Equipo'}
         </div>
         <div className="text-[18px] font-bold leading-tight truncate" style={{ color: textColor }}>
           {name}

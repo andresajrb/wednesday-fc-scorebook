@@ -4,8 +4,10 @@ import { getOpenJornada } from '@/store/selectors';
 import { UpdatePrompt } from '@/components/UpdatePrompt';
 import { WriteErrorBanner } from '@/components/WriteErrorBanner';
 import { requestPersistentStorage } from '@/lib/storage-health';
+import { useMatchAlarms } from '@/lib/useMatchAlarms';
 import { OnboardingScreen } from '@/screens/OnboardingScreen';
 import { HomeScreen } from '@/screens/HomeScreen';
+import { JornadaSetupScreen } from '@/screens/JornadaSetupScreen';
 import { JornadaActivaScreen } from '@/screens/JornadaActivaScreen';
 import { RegistrarPartidaScreen } from '@/screens/RegistrarPartidaScreen';
 import { ResumenJornadaScreen } from '@/screens/ResumenJornadaScreen';
@@ -19,6 +21,8 @@ function renderScreen(screen: Screen) {
       return <OnboardingScreen />;
     case 'home':
       return <HomeScreen />;
+    case 'jornada-setup':
+      return <JornadaSetupScreen />;
     case 'jornada-active':
       return <JornadaActivaScreen jornadaId={screen.jornadaId} />;
     case 'match-record':
@@ -34,6 +38,7 @@ function renderScreen(screen: Screen) {
 
 export default function App() {
   const screen = useStore((s) => s.ui.currentScreen);
+  useMatchAlarms();
 
   useEffect(() => {
     void requestPersistentStorage();
@@ -48,8 +53,7 @@ export default function App() {
     const store = useStore.getState();
     if (!store.state.config.onboardingDone) return;
     const open = getOpenJornada(store.state);
-    const jornadaId = open ? open.id : store.startJornada();
-    store.navigate({ name: 'jornada-active', jornadaId });
+    store.navigate(open ? { name: 'jornada-active', jornadaId: open.id } : { name: 'jornada-setup' });
   }, []);
 
   return (
