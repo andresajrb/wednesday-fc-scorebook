@@ -62,7 +62,40 @@ Caso real: un equipo fijo no pudo ir y se invitó a otro equipo que no es fijo, 
 
 ## 2. Requiere conversación antes de hacer
 
+### [x] Competiciones separadas (va antes de la tabla de temporada)
+Caso: jugar los miércoles con un grupo y los sábados con otro. Hoy todo queda mezclado (un solo
+conjunto de equipos, jugadores y jornadas). Meta: arrancar a usarlas desde el miércoles 4 de noviembre.
+
+Decidido:
+- Cada competición **totalmente separada**: equipos, jugadores, jornadas, partidas y goles propios.
+- **Configuración general** (duración, predicción, avisos) compartida por todas. Si más adelante hace
+  falta, pasar a configuración por competición (candidata: la duración de partida).
+- Modelo de datos **opción A**: listas planas donde `teams` y `jornadas` llevan `competitionId`
+  (jugadores, partidas y goles la heredan). Es la misma forma que tendrá en el servidor (columna
+  `competition_id`), así la sincronización sube los registros tal cual.
+- La competición con los datos actuales se llama **"Miércoles"** (editable).
+- **Importar equipos desde otra competición entra en este lote**: copia el equipo con sus jugadores,
+  sin historial.
+- Aislamiento con **una sola capa de vista filtrada**: las pantallas nunca leen las listas completas,
+  sino la vista de la competición activa (misma forma que los datos actuales), y las acciones del
+  store validan que lo que tocan pertenezca a esa competición.
+
+Cómo se ejecutaría:
+- Migración v5→v6: los datos actuales pasan a la primera competición. Probarla igual que la v5 (datos
+  reales en la versión vieja → actualizar con el aviso de la PWA → comparar byte a byte). También
+  migrar respaldos viejos, snapshots automáticos y la reparación de datos dañados.
+- Inicio: nombre de la competición activa con selector (cambiar / "+ Nueva competición").
+  Una competición nueva pasa por el onboarding de equipos.
+- Cada competición puede tener su jornada abierta; la bocina vigila la partida en curso de cualquiera.
+- El atajo "Iniciar jornada" del ícono abre la competición activa.
+
+- Competiciones: se pueden **archivar** (se esconden, los datos quedan) y **eliminar** (con mensaje
+  de validación antes de borrar).
+- Exportar/importar una sola competición: **queda para después** (cuando haga falta pasarla a otro
+  teléfono; con el backend se reemplaza por un link).
+
 ### [~] Tabla de temporada / período
+- Depende de: competiciones separadas (la temporada es por competición).
 Preguntas abiertas:
 - ¿Período fijo (mensual, anual) o "temporada" con inicio y fin definidos por el usuario? ¿Ambos?
 - ¿Qué se suma: puntos por partida (3/1/0), jornadas ganadas ("equipo del día"), o ambos?
