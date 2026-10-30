@@ -4,13 +4,14 @@ import { cn } from '@/lib/cn';
 import type { ID } from '@/types/domain';
 
 interface StandingsTableProps {
-  rows: TeamStandingRow[];
+  rows: Array<TeamStandingRow & { jornadasWon?: number }>;
   highlightTeamId?: ID | null;
+  /** Columna JG: jornadas en las que fue "equipo del día" (tabla de mes o temporada). */
+  showJornadasWon?: boolean;
 }
 
-const COLUMNS = '1.6fr repeat(6, 1fr)';
-
-export function StandingsTable({ rows, highlightTeamId }: StandingsTableProps) {
+export function StandingsTable({ rows, highlightTeamId, showJornadasWon }: StandingsTableProps) {
+  const COLUMNS = showJornadasWon ? '1.4fr repeat(7, 1fr)' : '1.6fr repeat(6, 1fr)';
   return (
     <div className="bg-bg-elev border border-border rounded-card overflow-hidden">
       <div
@@ -23,6 +24,11 @@ export function StandingsTable({ rows, highlightTeamId }: StandingsTableProps) {
         <span className="text-center">E</span>
         <span className="text-center">P</span>
         <span className="text-center">Dif</span>
+        {showJornadasWon && (
+          <span className="text-center" title="Jornadas ganadas">
+            JG
+          </span>
+        )}
         <span className="text-center">Pts</span>
       </div>
       {rows.map((row, idx) => {
@@ -61,6 +67,7 @@ export function StandingsTable({ rows, highlightTeamId }: StandingsTableProps) {
               {row.dif > 0 ? '+' : ''}
               {row.dif}
             </span>
+            {showJornadasWon && <span className="text-center">{row.jornadasWon ?? 0}</span>}
             <span className="text-center font-bold">{row.pts}</span>
           </div>
         );

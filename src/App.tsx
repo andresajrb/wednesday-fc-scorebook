@@ -9,6 +9,7 @@ import { useMatchAlarms } from '@/lib/useMatchAlarms';
 import { OnboardingScreen } from '@/screens/OnboardingScreen';
 import { HomeScreen } from '@/screens/HomeScreen';
 import { JornadaSetupScreen } from '@/screens/JornadaSetupScreen';
+import { TablaScreen } from '@/screens/TablaScreen';
 import { JornadaActivaScreen } from '@/screens/JornadaActivaScreen';
 import { RegistrarPartidaScreen } from '@/screens/RegistrarPartidaScreen';
 import { ResumenJornadaScreen } from '@/screens/ResumenJornadaScreen';
@@ -24,6 +25,8 @@ function renderScreen(screen: Screen) {
       return <HomeScreen />;
     case 'jornada-setup':
       return <JornadaSetupScreen />;
+    case 'season':
+      return <TablaScreen />;
     case 'jornada-active':
       return <JornadaActivaScreen jornadaId={screen.jornadaId} />;
     case 'match-record':

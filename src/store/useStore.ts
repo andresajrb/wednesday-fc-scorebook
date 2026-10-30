@@ -121,6 +121,7 @@ interface StoreActions {
   // Settings
   setAutoAssignNextMatch(value: boolean): void;
   setMatchDurationSeconds(value: number): void;
+  setSeasonStartMonth(month: number): void;
   setAlertConfig(
     patch: Partial<Pick<AppConfig, 'soundEnabled' | 'vibrationEnabled' | 'keepScreenOn'>>
   ): void;
@@ -818,6 +819,13 @@ export const useStore = create<Store>()(
             },
           },
         })),
+
+      setSeasonStartMonth: (month) =>
+        set((s) => {
+          const m = Math.round(month);
+          if (m < 1 || m > 12) return s;
+          return { state: { ...s.state, config: { ...s.state.config, seasonStartMonth: m } } };
+        }),
 
       setAlertConfig: (patch) =>
         set((s) => ({

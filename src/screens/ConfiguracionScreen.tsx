@@ -36,6 +36,21 @@ import {
 } from '@/store/snapshots';
 import { SCHEMA_VERSION } from '@/types/domain';
 
+const MONTHS = [
+  'Enero',
+  'Febrero',
+  'Marzo',
+  'Abril',
+  'Mayo',
+  'Junio',
+  'Julio',
+  'Agosto',
+  'Septiembre',
+  'Octubre',
+  'Noviembre',
+  'Diciembre',
+];
+
 export function ConfiguracionScreen() {
   const back = useStore((s) => s.back);
   const state = useStore((s) => s.state);
@@ -44,6 +59,7 @@ export function ConfiguracionScreen() {
   const setAutoAssignNextMatch = useStore((s) => s.setAutoAssignNextMatch);
   const setMatchDurationSeconds = useStore((s) => s.setMatchDurationSeconds);
   const setAlertConfig = useStore((s) => s.setAlertConfig);
+  const setSeasonStartMonth = useStore((s) => s.setSeasonStartMonth);
   const setTeamArchived = useStore((s) => s.setTeamArchived);
   const replaceState = useStore((s) => s.replaceState);
   const resetAll = useStore((s) => s.resetAll);
@@ -260,6 +276,27 @@ export function ConfiguracionScreen() {
                 />
                 <span className="text-caption text-text-2">min</span>
               </div>
+            </div>
+            <div className="p-3 border-t border-border flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="text-body-em font-semibold">Inicio de temporada</div>
+                <div className="text-caption text-text-2 mt-1">
+                  La tabla del año va 12 meses desde este mes. Igual para todas las competiciones.
+                </div>
+              </div>
+              <select
+                data-field="season-start"
+                value={state.config.seasonStartMonth ?? 1}
+                onChange={(e) => setSeasonStartMonth(Number(e.target.value))}
+                className="h-11 px-2 bg-bg-elev2 border border-border rounded-btn outline-none focus:border-accent text-body-em font-semibold"
+                aria-label="Mes de inicio de temporada"
+              >
+                {MONTHS.map((name, i) => (
+                  <option key={name} value={i + 1}>
+                    {name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         </section>

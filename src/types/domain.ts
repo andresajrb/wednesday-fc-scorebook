@@ -111,6 +111,8 @@ export interface AppConfig {
   soundEnabled: boolean;
   vibrationEnabled: boolean;
   keepScreenOn: boolean;
+  /** Mes (1-12) en que empieza la temporada. Sin valor = enero (año calendario). */
+  seasonStartMonth?: number;
 }
 
 /**
@@ -141,6 +143,7 @@ export type Screen =
   | { name: 'onboarding'; newCompetitionName?: string }
   | { name: 'home' }
   | { name: 'jornada-setup' }
+  | { name: 'season' }
   | { name: 'team-detail'; teamId: ID }
   | { name: 'jornada-active'; jornadaId: ID }
   | { name: 'match-record'; matchId: ID }

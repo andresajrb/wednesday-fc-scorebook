@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Settings, Play, ArrowRight, Trophy, ChevronRight, Plus, Download } from 'lucide-react';
+import { Settings, Play, ArrowRight, Trophy, ChevronRight, Plus, Download, Table2 } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { Button } from '@/components/primitives/Button';
 import { IconButton } from '@/components/primitives/IconButton';
@@ -90,6 +90,21 @@ export function HomeScreen() {
             </div>
           </div>
         )}
+
+        <button
+          type="button"
+          onClick={() => navigate({ name: 'season' })}
+          className="w-full flex items-center gap-3 rounded-card p-3.5 border border-border bg-bg-elev active:bg-bg-elev2 text-left"
+        >
+          <span className="w-9 h-9 rounded-md bg-bg-elev2 flex items-center justify-center flex-shrink-0 text-accent">
+            <Table2 size={18} strokeWidth={1.75} />
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-body-em font-semibold">Tabla</span>
+            <span className="block text-caption text-text-2">Del mes y de la temporada</span>
+          </span>
+          <ChevronRight size={18} className="text-text-3" strokeWidth={1.75} />
+        </button>
 
         <section>
           <div className="flex items-center justify-between mb-2">

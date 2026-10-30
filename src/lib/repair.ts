@@ -362,6 +362,11 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
       soundEnabled: configSource.soundEnabled !== false,
       vibrationEnabled: configSource.vibrationEnabled !== false,
       keepScreenOn: configSource.keepScreenOn !== false,
+      ...(typeof configSource.seasonStartMonth === 'number' &&
+      configSource.seasonStartMonth >= 1 &&
+      configSource.seasonStartMonth <= 12
+        ? { seasonStartMonth: configSource.seasonStartMonth }
+        : {}),
     },
   };
 

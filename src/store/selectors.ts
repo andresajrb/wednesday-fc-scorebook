@@ -96,25 +96,18 @@ export interface TeamStandingRow {
   pts: number;
 }
 
-export function getStandings(state: AppState, jornadaId: ID): TeamStandingRow[] {
-  const matches = getMatchesForJornada(state, jornadaId).filter(
-    (m) => m.result !== null && m.endedAt
-  );
-  const rows = new Map<ID, TeamStandingRow>();
-  for (const team of getJornadaTeams(state, jornadaId)) {
-    rows.set(team.id, {
-      team,
-      pj: 0,
-      g: 0,
-      e: 0,
-      p: 0,
-      gf: 0,
-      gc: 0,
-      dif: 0,
-      pts: 0,
-    });
-  }
+export function emptyStandingRow(team: Team): TeamStandingRow {
+  return { team, pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, dif: 0, pts: 0 };
+}
+
+/** Suma partidas terminadas a las filas de sus equipos (3/1/0). */
+export function accumulateMatches(
+  state: AppState,
+  matches: Match[],
+  rows: Map<ID, TeamStandingRow>
+): void {
   for (const m of matches) {
+    if (m.result === null || !m.endedAt) continue;
     const rA = rows.get(m.teamAId);
     const rB = rows.get(m.teamBId);
     if (!rA || !rB) continue;
@@ -133,16 +126,20 @@ export function getStandings(state: AppState, jornadaId: ID): TeamStandingRow[] 
       rB.g++;
       rA.p++;
       rB.pts += 3;
-    } else if (m.result === 'draw') {
+    } else {
       rA.e++;
       rB.e++;
       rA.pts += 1;
       rB.pts += 1;
     }
   }
-  for (const r of rows.values()) {
-    r.dif = r.gf - r.gc;
-  }
+  for (const r of rows.values()) r.dif = r.gf - r.gc;
+}
+
+export function getStandings(state: AppState, jornadaId: ID): TeamStandingRow[] {
+  const rows = new Map<ID, TeamStandingRow>();
+  for (const team of getJornadaTeams(state, jornadaId)) rows.set(team.id, emptyStandingRow(team));
+  accumulateMatches(state, getMatchesForJornada(state, jornadaId), rows);
   return [...rows.values()].sort(
     (a, b) =>
       b.pts - a.pts || b.dif - a.dif || b.gf - a.gf || a.team.name.localeCompare(b.team.name)
