@@ -1,12 +1,15 @@
 import { useState } from 'react';
-import { Settings, Play, ArrowRight, Trophy, ChevronRight, Plus } from 'lucide-react';
+import { Settings, Play, ArrowRight, Trophy, ChevronRight, Plus, Download } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { Button } from '@/components/primitives/Button';
 import { IconButton } from '@/components/primitives/IconButton';
 import { Logo } from '@/components/primitives/Logo';
 import { TeamCard } from '@/components/domain/TeamCard';
 import { TeamFormSheet } from '@/components/domain/TeamFormSheet';
+import { CompetitionSwitcher } from '@/components/domain/CompetitionSwitcher';
+import { ImportTeamsSheet } from '@/components/domain/ImportTeamsSheet';
 import { useStore } from '@/store/useStore';
+import { useScopedState } from '@/store/useScopedState';
 import {
   getOpenJornada,
   getActivePlayersByTeam,
@@ -19,11 +22,14 @@ import { formatDayShort, formatRelative } from '@/lib/format';
 import { softColor, lightenForText } from '@/lib/colors';
 
 export function HomeScreen() {
-  const state = useStore((s) => s.state);
+  const state = useScopedState();
   const navigate = useStore((s) => s.navigate);
   const open = getOpenJornada(state);
   const teams = getSortedTeams(state);
   const [creatingTeam, setCreatingTeam] = useState(false);
+  const [importingTeams, setImportingTeams] = useState(false);
+  const competitionCount = useStore((s) => Object.keys(s.state.competitions).length);
+  const importTeams = useStore((s) => s.importTeams);
   const closed = getClosedJornadasDesc(state).slice(0, 5);
 
   const onStartOrContinue = () => {
@@ -38,7 +44,7 @@ export function HomeScreen() {
     <ScreenShell>
       <header className="sticky top-0 z-30 backdrop-blur-md bg-bg/85 border-b border-border px-4 py-2.5 flex items-center gap-3">
         <Logo size={32} className="text-accent flex-shrink-0" />
-        <h1 className="text-[22px] font-bold tracking-tight flex-1">Miércoles</h1>
+        <CompetitionSwitcher />
         <IconButton ariaLabel="Configuración" onClick={() => navigate({ name: 'settings' })}>
           <Settings size={20} strokeWidth={1.75} />
         </IconButton>
@@ -111,6 +117,16 @@ export function HomeScreen() {
               <span className="text-body-em font-medium">Nuevo equipo</span>
             </button>
           </div>
+          {competitionCount > 1 && (
+            <button
+              type="button"
+              onClick={() => setImportingTeams(true)}
+              className="mt-3 w-full flex items-center justify-center gap-2 h-11 rounded-card border border-dashed border-border-strong text-text-2 active:bg-bg-elev"
+            >
+              <Download size={16} strokeWidth={1.75} />
+              <span className="text-body-em font-medium">Importar de otra competición</span>
+            </button>
+          )}
         </section>
 
         <section>
@@ -155,6 +171,15 @@ export function HomeScreen() {
         </section>
       </div>
       <TeamFormSheet open={creatingTeam} onClose={() => setCreatingTeam(false)} />
+      <ImportTeamsSheet
+        open={importingTeams}
+        onClose={() => setImportingTeams(false)}
+        targetCompetitionId={state.activeCompetitionId}
+        takenNames={Object.values(state.teams)
+          .filter((t) => !t.archived)
+          .map((t) => t.name)}
+        onConfirm={importTeams}
+      />
     </ScreenShell>
   );
 }

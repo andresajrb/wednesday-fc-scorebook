@@ -4,6 +4,7 @@ import { BottomSheet } from '@/components/primitives/BottomSheet';
 import { TeamFormSheet } from '@/components/domain/TeamFormSheet';
 import { GuestBadge } from '@/components/domain/TeamPickRow';
 import { useStore } from '@/store/useStore';
+import { useScopedState } from '@/store/useScopedState';
 import { getJornadaTeams, getMatchesForJornada, getSortedTeams } from '@/store/selectors';
 import { MAX_JORNADA_TEAMS, MIN_JORNADA_TEAMS, type ID, type Team } from '@/types/domain';
 
@@ -15,7 +16,7 @@ interface JornadaTeamsSheetProps {
 
 /** Equipos de la jornada en curso: sumar a uno que llegó tarde o quitar a uno que no vino. */
 export function JornadaTeamsSheet({ open, onClose, jornadaId }: JornadaTeamsSheetProps) {
-  const state = useStore((s) => s.state);
+  const state = useScopedState();
   const addTeamToJornada = useStore((s) => s.addTeamToJornada);
   const removeTeamFromJornada = useStore((s) => s.removeTeamFromJornada);
   const [creating, setCreating] = useState(false);

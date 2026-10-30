@@ -14,7 +14,7 @@ const RING_KEYS = [
   'miercoles-snapshot-3',
 ] as const;
 
-export type SnapshotReason = 'boot' | 'jornada' | 'import';
+export type SnapshotReason = 'boot' | 'jornada' | 'import' | 'delete';
 
 interface SnapshotRecord {
   reason: SnapshotReason;
@@ -35,6 +35,7 @@ const REASON_LABEL: Record<SnapshotReason, string> = {
   boot: 'Al abrir la app',
   jornada: 'Al cerrar una jornada',
   import: 'Antes de importar un respaldo',
+  delete: 'Antes de eliminar una competición',
 };
 
 export function snapshotReasonLabel(reason: SnapshotReason): string {

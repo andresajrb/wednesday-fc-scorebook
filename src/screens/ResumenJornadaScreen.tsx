@@ -9,6 +9,7 @@ import { StandingsTable } from '@/components/domain/StandingsTable';
 import { ShareSheet } from '@/components/domain/ShareSheet';
 import { getJornadaReport } from '@/lib/jornadaReport';
 import { useStore } from '@/store/useStore';
+import { useScopedState } from '@/store/useScopedState';
 import {
   getStandings,
   getJornadaWinnerTeam,
@@ -27,7 +28,7 @@ interface ResumenJornadaScreenProps {
 export function ResumenJornadaScreen({ jornadaId }: ResumenJornadaScreenProps) {
   const back = useStore((s) => s.back);
   const navigate = useStore((s) => s.navigate);
-  const state = useStore((s) => s.state);
+  const state = useScopedState();
   const jornada = state.jornadas[jornadaId];
   const report = useMemo(() => getJornadaReport(state, jornadaId), [state, jornadaId]);
   const [shareOpen, setShareOpen] = useState(false);

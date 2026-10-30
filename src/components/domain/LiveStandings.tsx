@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChevronDown, Table2 } from 'lucide-react';
 import { StandingsTable } from '@/components/domain/StandingsTable';
-import { useStore } from '@/store/useStore';
+import { useScopedState } from '@/store/useScopedState';
 import { getJornadaWinnerTeam, getStandings, getTopScorers } from '@/store/selectors';
 import { cn } from '@/lib/cn';
 import type { ID } from '@/types/domain';
@@ -26,7 +26,7 @@ function writeOpen(open: boolean): void {
 
 /** Tabla y goleadores de la jornada en curso. Cerrada por defecto para no tapar la cancha. */
 export function LiveStandings({ jornadaId }: { jornadaId: ID }) {
-  const state = useStore((s) => s.state);
+  const state = useScopedState();
   const [open, setOpen] = useState(readOpen);
 
   const standings = getStandings(state, jornadaId);

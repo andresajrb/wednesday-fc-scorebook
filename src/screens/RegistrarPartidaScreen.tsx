@@ -12,6 +12,7 @@ import { MatchClock } from '@/components/domain/MatchClock';
 import { MatchGoalsDrawer } from '@/components/domain/MatchGoalsDrawer';
 import { MatchReassignSheet, type ReassignPick } from '@/components/domain/MatchReassignSheet';
 import { useStore } from '@/store/useStore';
+import { useScopedState } from '@/store/useScopedState';
 import {
   getMatchScore,
   getGoalsByPlayerForMatch,
@@ -29,7 +30,7 @@ interface RegistrarPartidaScreenProps {
 export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps) {
   const back = useStore((s) => s.back);
   const navigate = useStore((s) => s.navigate);
-  const state = useStore((s) => s.state);
+  const state = useScopedState();
   const addGoal = useStore((s) => s.addGoal);
   const removeGoal = useStore((s) => s.removeGoal);
   const reassignGoal = useStore((s) => s.reassignGoal);

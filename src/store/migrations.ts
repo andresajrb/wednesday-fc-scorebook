@@ -1,4 +1,9 @@
-import { DEFAULT_MATCH_DURATION_SECONDS, SCHEMA_VERSION, type AppState } from '@/types/domain';
+import {
+  DEFAULT_COMPETITION_NAME,
+  DEFAULT_MATCH_DURATION_SECONDS,
+  SCHEMA_VERSION,
+  type AppState,
+} from '@/types/domain';
 
 type MigrationFn = (data: unknown) => unknown;
 
@@ -117,6 +122,51 @@ const migrations: Record<number, MigrationFn> = {
         vibrationEnabled: config.vibrationEnabled !== false,
         keepScreenOn: config.keepScreenOn !== false,
       },
+    };
+  },
+  6: (data) => {
+    // v6: competiciones separadas. Todo lo que había pasa a "Miércoles", sin tocar
+    // ningún otro campo. Una instalación sin equipos no recibe competición: la crea
+    // el onboarding.
+    const d = data as {
+      teams?: Record<string, unknown>;
+      jornadas?: Record<string, unknown>;
+      competitions?: unknown;
+    } & Record<string, unknown>;
+    const isObj = (x: unknown): x is Record<string, unknown> =>
+      typeof x === 'object' && x !== null && !Array.isArray(x);
+    if (isObj(d.competitions) && Object.keys(d.competitions).length > 0) return d;
+
+    const teamsIn = isObj(d.teams) ? d.teams : {};
+    const jornadasIn = isObj(d.jornadas) ? d.jornadas : {};
+    if (Object.keys(teamsIn).length === 0 && Object.keys(jornadasIn).length === 0) {
+      return { ...d, competitions: {}, activeCompetitionId: null };
+    }
+
+    const id =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `c-${Date.now().toString(36)}`;
+    const withCompetition = (records: Record<string, unknown>) => {
+      const out: Record<string, unknown> = {};
+      for (const [key, r] of Object.entries(records)) {
+        out[key] = isObj(r) ? { ...r, competitionId: id } : r;
+      }
+      return out;
+    };
+    return {
+      ...d,
+      competitions: {
+        [id]: {
+          id,
+          name: DEFAULT_COMPETITION_NAME,
+          archived: false,
+          createdAt: new Date().toISOString(),
+        },
+      },
+      activeCompetitionId: id,
+      teams: withCompetition(teamsIn),
+      jornadas: withCompetition(jornadasIn),
     };
   },
 };

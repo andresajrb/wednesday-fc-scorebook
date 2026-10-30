@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
-import { useStore } from '@/store/useStore';
+import { needsOnboarding, useStore } from '@/store/useStore';
 import { getOpenJornada } from '@/store/selectors';
+import { activeScope } from '@/store/scope';
 import { UpdatePrompt } from '@/components/UpdatePrompt';
 import { WriteErrorBanner } from '@/components/WriteErrorBanner';
 import { requestPersistentStorage } from '@/lib/storage-health';
@@ -18,7 +19,7 @@ import type { Screen } from '@/types/domain';
 function renderScreen(screen: Screen) {
   switch (screen.name) {
     case 'onboarding':
-      return <OnboardingScreen />;
+      return <OnboardingScreen newCompetitionName={screen.newCompetitionName} />;
     case 'home':
       return <HomeScreen />;
     case 'jornada-setup':
@@ -51,8 +52,8 @@ export default function App() {
     if (params.get('action') !== 'start-jornada') return;
     window.history.replaceState({}, '', window.location.pathname);
     const store = useStore.getState();
-    if (!store.state.config.onboardingDone) return;
-    const open = getOpenJornada(store.state);
+    if (needsOnboarding(store.state)) return;
+    const open = getOpenJornada(activeScope(store.state));
     store.navigate(open ? { name: 'jornada-active', jornadaId: open.id } : { name: 'jornada-setup' });
   }, []);
 

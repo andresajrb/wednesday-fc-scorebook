@@ -1,5 +1,9 @@
-import type { AppState, Goal, ID, Jornada, Match, Player, Team } from '@/types/domain';
-import { DEFAULT_MATCH_DURATION_SECONDS, SCHEMA_VERSION } from '@/types/domain';
+import type { AppState, Competition, Goal, ID, Jornada, Match, Player, Team } from '@/types/domain';
+import {
+  DEFAULT_COMPETITION_NAME,
+  DEFAULT_MATCH_DURATION_SECONDS,
+  SCHEMA_VERSION,
+} from '@/types/domain';
 
 export interface RepairReport {
   /** Cómo se logró parsear el blob crudo. */
@@ -129,6 +133,37 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
   const { value, how } = parseLoose(raw);
   const source = findAppStateLike(value);
 
+  const competitions = records<Competition>(source.competitions, (c) => {
+    const id = str(c.id);
+    const name = str(c.name);
+    if (!id || !name) return null;
+    return {
+      id,
+      name,
+      archived: c.archived === true,
+      createdAt: str(c.createdAt) ?? new Date(0).toISOString(),
+    };
+  });
+  // Datos de antes de v6 (o sin competiciones legibles): todo va a "Miércoles".
+  let fallbackCompetitionId: ID | null = null;
+  const competitionFor = (value: unknown): ID => {
+    const id = str(value);
+    if (id && competitions[id]) return id;
+    if (!fallbackCompetitionId) {
+      fallbackCompetitionId =
+        Object.values(competitions).find((c) => !c.archived)?.id ?? `c-${Date.now().toString(36)}`;
+      if (!competitions[fallbackCompetitionId]) {
+        competitions[fallbackCompetitionId] = {
+          id: fallbackCompetitionId,
+          name: DEFAULT_COMPETITION_NAME,
+          archived: false,
+          createdAt: new Date().toISOString(),
+        };
+      }
+    }
+    return fallbackCompetitionId;
+  };
+
   const teams = records<Team>(source.teams, (t) => {
     const id = str(t.id);
     const name = str(t.name);
@@ -136,6 +171,7 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
     if (!id || !name || !color) return null;
     return {
       id,
+      competitionId: competitionFor(t.competitionId),
       name,
       color,
       kind: t.kind === 'guest' ? 'guest' : 'fixed',
@@ -181,8 +217,12 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
     const date = str(j.date);
     if (!id || !date) return null;
     if (!Array.isArray(j.teamIds) && j.status !== 'closed') legacyOpenJornadas.add(id);
+    const competitionId = competitionFor(j.competitionId);
     const teamIds = Array.isArray(j.teamIds)
-      ? j.teamIds.filter((t): t is string => typeof t === 'string' && !!teams[t])
+      ? j.teamIds.filter(
+          (t): t is string =>
+            typeof t === 'string' && teams[t]?.competitionId === competitionId
+        )
       : [];
     const lateJoins: Record<ID, number> = {};
     if (isObj(j.lateJoins)) {
@@ -192,6 +232,7 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
     }
     return {
       id,
+      competitionId,
       date,
       status: j.status === 'closed' ? 'closed' : 'open',
       teamIds,
@@ -212,7 +253,12 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
       droppedMatches += 1;
       return null;
     }
-    if (!jornadas[jornadaId] || !teams[teamAId] || !teams[teamBId]) {
+    const jornada = jornadas[jornadaId];
+    if (
+      !jornada ||
+      teams[teamAId]?.competitionId !== jornada.competitionId ||
+      teams[teamBId]?.competitionId !== jornada.competitionId
+    ) {
       droppedMatches += 1;
       return null;
     }
@@ -258,7 +304,9 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
     for (const t of played) if (!jornada.teamIds.includes(t)) jornada.teamIds.push(t);
     if (jornada.teamIds.length === 0 || legacyOpenJornadas.has(jornada.id)) {
       for (const t of teamIds) {
-        if (!teams[t].archived && !jornada.teamIds.includes(t)) jornada.teamIds.push(t);
+        const team = teams[t];
+        if (team.competitionId !== jornada.competitionId || team.archived) continue;
+        if (!jornada.teamIds.includes(t)) jornada.teamIds.push(t);
       }
     }
   }
@@ -289,8 +337,15 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
   });
 
   const configSource = isObj(source.config) ? source.config : {};
+  const sourceActive = str(source.activeCompetitionId);
+  const activeCompetitionId =
+    sourceActive && competitions[sourceActive] && !competitions[sourceActive].archived
+      ? sourceActive
+      : (Object.values(competitions).find((c) => !c.archived)?.id ?? null);
   const state: AppState = {
     version: SCHEMA_VERSION,
+    competitions,
+    activeCompetitionId,
     teams,
     players,
     jornadas,

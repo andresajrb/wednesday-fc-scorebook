@@ -1,6 +1,6 @@
 export type ID = string;
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const DEFAULT_MATCH_DURATION_SECONDS = 7 * 60;
 
@@ -8,11 +8,26 @@ export const DEFAULT_MATCH_DURATION_SECONDS = 7 * 60;
 export const MIN_JORNADA_TEAMS = 3;
 export const MAX_JORNADA_TEAMS = 6;
 
+/** Nombre de la competición donde quedan los datos de antes de v6. */
+export const DEFAULT_COMPETITION_NAME = 'Miércoles';
+
+/**
+ * Competición: un grupo con sus propios equipos, jugadores y jornadas, totalmente
+ * separado de los demás (p. ej. los miércoles y los sábados). La configuración es general.
+ */
+export interface Competition {
+  id: ID;
+  name: string;
+  archived: boolean;
+  createdAt: string;
+}
+
 /** `guest`: equipo que viene a cubrir cuando uno fijo no puede. */
 export type TeamKind = 'fixed' | 'guest';
 
 export interface Team {
   id: ID;
+  competitionId: ID;
   name: string;
   color: string;
   kind: TeamKind;
@@ -73,6 +88,7 @@ export type JornadaStatus = 'open' | 'closed';
 
 export interface Jornada {
   id: ID;
+  competitionId: ID;
   date: string;
   status: JornadaStatus;
   /** Equipos que asisten, en orden de llegada (= orden inicial de la cola). */
@@ -97,8 +113,15 @@ export interface AppConfig {
   keepScreenOn: boolean;
 }
 
+/**
+ * Listas planas: `teams` y `jornadas` llevan su `competitionId`; jugadores, partidas y
+ * goles la heredan. Es la misma forma que tendrá en un servidor. Las pantallas nunca leen
+ * estas listas completas: usan la vista de la competición activa (`useScopedState`).
+ */
 export interface AppState {
   version: number;
+  competitions: Record<ID, Competition>;
+  activeCompetitionId: ID | null;
   teams: Record<ID, Team>;
   players: Record<ID, Player>;
   jornadas: Record<ID, Jornada>;
@@ -115,7 +138,7 @@ export interface BackupFile {
 }
 
 export type Screen =
-  | { name: 'onboarding' }
+  | { name: 'onboarding'; newCompetitionName?: string }
   | { name: 'home' }
   | { name: 'jornada-setup' }
   | { name: 'team-detail'; teamId: ID }

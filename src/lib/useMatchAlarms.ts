@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { useStore } from '@/store/useStore';
-import { getOpenJornada } from '@/store/selectors';
 import { fireAlert, setKeepScreenOn, WARNING_BEFORE_END_SECONDS, type AlertKind } from '@/lib/alerts';
 
 /**
@@ -35,17 +34,19 @@ function writeHandled(matchId: string, done: Set<AlertKind>): void {
 }
 
 /**
- * Vigila la partida en curso de la jornada abierta, esté en la pantalla que esté el
+ * Vigila la partida en curso de cualquier jornada abierta, esté en la pantalla que esté el
  * usuario, y dispara el aviso de último minuto y la bocina final una sola vez.
  */
 export function useMatchAlarms(): void {
   const state = useStore((s) => s.state);
-  const open = getOpenJornada(state);
-  const running = open
-    ? Object.values(state.matches).find(
-        (m) => m.jornadaId === open.id && m.result === null && !m.endedAt && m.clockStartedAt
-      )
-    : undefined;
+  // Cualquier competición: puede haber una jornada abierta en cada una.
+  const running = Object.values(state.matches).find(
+    (m) =>
+      state.jornadas[m.jornadaId]?.status === 'open' &&
+      m.result === null &&
+      !m.endedAt &&
+      m.clockStartedAt
+  );
   const { matchDurationSeconds, soundEnabled, vibrationEnabled, keepScreenOn } = state.config;
   const matchId = running?.id;
   const clockStartedAt = running?.clockStartedAt;

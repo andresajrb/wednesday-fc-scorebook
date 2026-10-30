@@ -4,6 +4,7 @@ import { BottomSheet } from '@/components/primitives/BottomSheet';
 import { Button } from '@/components/primitives/Button';
 import { TeamSwatch } from '@/components/domain/TeamSwatch';
 import { useStore } from '@/store/useStore';
+import { useScopedState } from '@/store/useScopedState';
 import { COLOR_SWATCHES, nextFreeColor } from '@/lib/colors';
 import { cn } from '@/lib/cn';
 import type { ID, TeamKind } from '@/types/domain';
@@ -16,7 +17,7 @@ interface TeamFormSheetProps {
 }
 
 export function TeamFormSheet({ open, onClose, onCreated, defaultKind = 'fixed' }: TeamFormSheetProps) {
-  const teams = useStore((s) => s.state.teams);
+  const teams = useScopedState().teams;
   const createTeam = useStore((s) => s.createTeam);
   const [name, setName] = useState('');
   const [color, setColor] = useState(COLOR_SWATCHES[0]);

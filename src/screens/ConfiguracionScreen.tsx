@@ -20,6 +20,8 @@ import { ToggleSwitch } from '@/components/primitives/ToggleSwitch';
 import { TeamSwatch } from '@/components/domain/TeamSwatch';
 import { useStore } from '@/store/useStore';
 import { getSortedTeams } from '@/store/selectors';
+import { activeScope } from '@/store/scope';
+import { CompetitionsManager } from '@/components/domain/CompetitionsManager';
 import { playTestAlert } from '@/lib/alerts';
 import { downloadBackup, downloadBackupFile, readBackupFile, BackupError } from '@/lib/backup';
 import { COLOR_SWATCHES } from '@/lib/colors';
@@ -107,8 +109,10 @@ export function ConfiguracionScreen() {
     }
   };
 
-  const teams = getSortedTeams(state);
-  const archivedTeams = Object.values(state.teams).filter((t) => t.archived);
+  // Los equipos que se muestran son los de la competición activa.
+  const scoped = activeScope(state);
+  const teams = getSortedTeams(scoped);
+  const archivedTeams = Object.values(scoped.teams).filter((t) => t.archived);
 
   const onPickFile = async (file: File | null) => {
     if (!file) return;
@@ -148,9 +152,11 @@ export function ConfiguracionScreen() {
       />
 
       <div className="px-4 py-4 space-y-6 flex-1">
+        <CompetitionsManager />
+
         <section>
           <div className="text-caption uppercase tracking-wider text-text-2 font-semibold mb-2">
-            Equipos
+            Equipos · {state.competitions[state.activeCompetitionId ?? '']?.name}
           </div>
           <div className="bg-bg-elev border border-border rounded-card overflow-hidden">
             {teams.map((t, idx) => (

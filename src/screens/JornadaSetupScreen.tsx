@@ -8,13 +8,15 @@ import { StickyBottomCTA } from '@/components/primitives/StickyBottomCTA';
 import { TeamFormSheet } from '@/components/domain/TeamFormSheet';
 import { TeamPickRow } from '@/components/domain/TeamPickRow';
 import { useStore } from '@/store/useStore';
+import { useScopedState } from '@/store/useScopedState';
 import { getOpenJornada, getSortedTeams } from '@/store/selectors';
+import { activeScope } from '@/store/scope';
 import { MAX_JORNADA_TEAMS, MIN_JORNADA_TEAMS, type ID } from '@/types/domain';
 
 export function JornadaSetupScreen() {
   const back = useStore((s) => s.back);
   const navigate = useStore((s) => s.navigate);
-  const state = useStore((s) => s.state);
+  const state = useScopedState();
   const startJornada = useStore((s) => s.startJornada);
 
   const teams = getSortedTeams(state);
@@ -42,7 +44,7 @@ export function JornadaSetupScreen() {
   const onStart = () => {
     if (!valid) return;
     // Nunca dos jornadas abiertas: si ya hay una (otra pestaña), se continúa esa.
-    const open = getOpenJornada(useStore.getState().state);
+    const open = getOpenJornada(activeScope(useStore.getState().state));
     const id = open ? open.id : startJornada(selected);
     navigate({ name: 'jornada-active', jornadaId: id }, { replace: true });
   };

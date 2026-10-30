@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import type {
   AppConfig,
   AppState,
+  Competition,
   ID,
   Match,
   MatchRosterEntry,
@@ -11,6 +12,7 @@ import type {
   TeamKind,
 } from '@/types/domain';
 import {
+  DEFAULT_COMPETITION_NAME,
   DEFAULT_MATCH_DURATION_SECONDS,
   MAX_JORNADA_TEAMS,
   SCHEMA_VERSION,
@@ -34,6 +36,7 @@ import {
 } from './persistence';
 import { clearSnapshots, looksLikeDataLoss, rotateSnapshot, writeBootSnapshot } from './snapshots';
 import { migrateAppState } from './migrations';
+import { activeScope, playerCompetition } from './scope';
 import { todayISODate } from '@/lib/format';
 
 const newId = (): ID =>
@@ -63,7 +66,17 @@ interface StoreData {
 
 interface StoreActions {
   // Onboarding
-  completeOnboarding(teams: Array<{ name: string; color: string }>): void;
+  completeOnboarding(
+    teams: Array<{ name: string; color: string }>,
+    opts?: { competitionName?: string; imports?: TeamImport[] }
+  ): void;
+
+  // Competiciones
+  setActiveCompetition(competitionId: ID): void;
+  renameCompetition(competitionId: ID, name: string): void;
+  setCompetitionArchived(competitionId: ID, archived: boolean): void;
+  deleteCompetition(competitionId: ID): Promise<void>;
+  importTeams(imports: TeamImport[]): void;
 
   // Teams
   createTeam(input: { name: string; color: string; kind: TeamKind }): ID;
@@ -132,9 +145,39 @@ interface StoreActions {
 
 type Store = StoreData & StoreActions;
 
+/** Equipo de otra competición a copiar (con sus jugadores activos, sin historial). */
+export interface TeamImport {
+  teamId: ID;
+  name: string;
+}
+
+/** Por qué no se puede archivar o eliminar una competición, o null si se puede. */
+export function competitionLockReason(state: AppState, competitionId: ID): string | null {
+  const competition = state.competitions[competitionId];
+  if (!competition) return 'La competición no existe.';
+  const hasOpenJornada = Object.values(state.jornadas).some(
+    (j) => j.competitionId === competitionId && j.status === 'open'
+  );
+  if (hasOpenJornada) return 'Tiene una jornada abierta: ciérrala primero.';
+  const visible = Object.values(state.competitions).filter((c) => !c.archived);
+  if (!competition.archived && visible.length <= 1) {
+    return 'Es la única competición activa: siempre tiene que quedar al menos una.';
+  }
+  return null;
+}
+
+/** Hay que pasar por el onboarding si no hay competición activa o no tiene equipos. */
+export function needsOnboarding(state: AppState): boolean {
+  const activeId = state.activeCompetitionId;
+  if (!activeId || !state.competitions[activeId]) return true;
+  return !Object.values(state.teams).some((t) => t.competitionId === activeId);
+}
+
 function makeInitialState(): AppState {
   return {
     version: SCHEMA_VERSION,
+    competitions: {},
+    activeCompetitionId: null,
     teams: {},
     players: {},
     jornadas: {},
@@ -152,9 +195,13 @@ function makeInitialState(): AppState {
   };
 }
 
-function makeTeam(input: { name: string; color: string; kind?: TeamKind }): Team {
+function makeTeam(
+  input: { name: string; color: string; kind?: TeamKind },
+  competitionId: ID
+): Team {
   return {
     id: newId(),
+    competitionId,
     name: input.name,
     color: input.color,
     kind: input.kind ?? 'fixed',
@@ -163,9 +210,65 @@ function makeTeam(input: { name: string; color: string; kind?: TeamKind }): Team
   };
 }
 
+function makeCompetition(name: string): Competition {
+  return { id: newId(), name, archived: false, createdAt: nowISO() };
+}
+
+/**
+ * Copia equipos de otra competición con sus jugadores activos. Son registros nuevos e
+ * independientes: no arrastran historial ni quedan atados al original.
+ */
+function copyTeams(
+  state: AppState,
+  imports: TeamImport[],
+  competitionId: ID
+): Pick<AppState, 'teams' | 'players'> {
+  const teams = { ...state.teams };
+  const players = { ...state.players };
+  for (const { teamId, name } of imports) {
+    const source = state.teams[teamId];
+    if (!source || source.competitionId === competitionId) continue;
+    const team: Team = { ...makeTeam(source, competitionId), name: name.trim() || source.name };
+    teams[team.id] = team;
+    for (const p of Object.values(state.players)) {
+      if (p.teamId !== teamId || !p.active) continue;
+      const id = newId();
+      players[id] = { id, name: p.name, teamId: team.id, active: true, createdAt: nowISO() };
+    }
+  }
+  return { teams, players };
+}
+
+function homeScreen(state: AppState): Screen {
+  return needsOnboarding(state) ? { name: 'onboarding' } : { name: 'home' };
+}
+
 function makeInitialUI(state: AppState): StoreData['ui'] {
-  const screen: Screen = state.config.onboardingDone ? { name: 'home' } : { name: 'onboarding' };
-  return { currentScreen: screen, history: [] };
+  return { currentScreen: homeScreen(state), history: [] };
+}
+
+function firstVisible(competitions: Record<ID, Competition>): ID | null {
+  return (
+    Object.values(competitions)
+      .filter((c) => !c.archived)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]?.id ?? null
+  );
+}
+
+function omit<T extends { id: ID }>(records: Record<ID, T>, drop: (r: T) => boolean): Record<ID, T> {
+  const out: Record<ID, T> = {};
+  for (const r of Object.values(records)) if (!drop(r)) out[r.id] = r;
+  return out;
+}
+
+/** Competición de una jornada; null si no existe. */
+function jornadaCompetition(state: AppState, jornadaId: ID): ID | null {
+  return state.jornadas[jornadaId]?.competitionId ?? null;
+}
+
+function matchCompetition(state: AppState, matchId: ID): ID | null {
+  const m = state.matches[matchId];
+  return m ? jornadaCompetition(state, m.jornadaId) : null;
 }
 
 const initialState = makeInitialState();
@@ -183,44 +286,133 @@ export const useStore = create<Store>()(
       clearHydrateError: () => set(() => ({ hydrateError: null })),
       clearWriteError: () => set(() => ({ writeError: null })),
 
-      completeOnboarding: (teamsInput) =>
+      completeOnboarding: (teamsInput, opts = {}) =>
         set((s) => {
-          const existing = Object.values(s.state.teams);
-          const teams: Record<ID, Team> = {};
+          let competitions = s.state.competitions;
+          let activeId = s.state.activeCompetitionId;
+          // Competición nueva (desde el selector) o primera instalación.
+          if (opts.competitionName || !activeId || !competitions[activeId]) {
+            const competition = makeCompetition(
+              opts.competitionName?.trim() || DEFAULT_COMPETITION_NAME
+            );
+            competitions = { ...competitions, [competition.id]: competition };
+            activeId = competition.id;
+          }
+          const competitionId: ID = activeId;
 
-          if (existing.length > 0) {
-            // Ya hay equipos: renombrar y recolorear los que están, nunca generar
-            // IDs nuevos. Regenerarlos dejaba a todos los jugadores apuntando a
-            // equipos inexistentes, o sea invisibles en toda la app.
-            const ordered = existing.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-            for (const team of ordered) teams[team.id] = team;
-            ordered.forEach((team, i) => {
-              const input = teamsInput[i];
-              if (input) teams[team.id] = { ...team, name: input.name, color: input.color };
-            });
-            for (const input of teamsInput.slice(ordered.length)) {
-              const team = makeTeam(input);
-              teams[team.id] = team;
-            }
-          } else {
-            for (const input of teamsInput) {
-              const team = makeTeam(input);
-              teams[team.id] = team;
-            }
+          const teams = { ...s.state.teams };
+          const existing = Object.values(teams)
+            .filter((t) => t.competitionId === competitionId)
+            .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+          // Ya hay equipos: renombrar y recolorear los que están, nunca generar IDs nuevos.
+          // Regenerarlos dejaba a todos los jugadores apuntando a equipos inexistentes,
+          // o sea invisibles en toda la app.
+          existing.forEach((team, i) => {
+            const input = teamsInput[i];
+            if (input) teams[team.id] = { ...team, name: input.name, color: input.color };
+          });
+          for (const input of teamsInput.slice(existing.length)) {
+            const team = makeTeam(input, competitionId);
+            teams[team.id] = team;
           }
 
+          const withTeams = { ...s.state, teams };
+          const copied = copyTeams(withTeams, opts.imports ?? [], competitionId);
+          const next: AppState = {
+            ...withTeams,
+            ...copied,
+            competitions,
+            activeCompetitionId: competitionId,
+            config: { ...s.state.config, onboardingDone: true },
+          };
+          return { state: next, ui: { currentScreen: { name: 'home' }, history: [] } };
+        }),
+
+      setActiveCompetition: (competitionId) =>
+        set((s) => {
+          const competition = s.state.competitions[competitionId];
+          if (!competition || competition.archived) return s;
+          const next = { ...s.state, activeCompetitionId: competitionId };
+          // Las pantallas abiertas apuntan a datos de la otra competición: se vuelve al inicio.
+          return { state: next, ui: makeInitialUI(next) };
+        }),
+
+      renameCompetition: (competitionId, name) =>
+        set((s) => {
+          const competition = s.state.competitions[competitionId];
+          const trimmed = name.trim();
+          if (!competition || !trimmed) return s;
           return {
             state: {
               ...s.state,
-              teams,
-              config: { ...s.state.config, onboardingDone: true },
+              competitions: {
+                ...s.state.competitions,
+                [competitionId]: { ...competition, name: trimmed },
+              },
             },
-            ui: { currentScreen: { name: 'home' }, history: [] },
           };
         }),
 
+      setCompetitionArchived: (competitionId, archived) =>
+        set((s) => {
+          const competition = s.state.competitions[competitionId];
+          if (!competition || competition.archived === archived) return s;
+          if (archived && competitionLockReason(s.state, competitionId)) return s;
+          const competitions = {
+            ...s.state.competitions,
+            [competitionId]: { ...competition, archived },
+          };
+          let activeId = s.state.activeCompetitionId;
+          if (archived && activeId === competitionId) activeId = firstVisible(competitions);
+          const next = { ...s.state, competitions, activeCompetitionId: activeId };
+          return activeId === s.state.activeCompetitionId
+            ? { state: next }
+            : { state: next, ui: makeInitialUI(next) };
+        }),
+
+      deleteCompetition: async (competitionId) => {
+        if (competitionLockReason(get().state, competitionId)) return;
+        // Borrar es irreversible: antes queda una copia en los respaldos automáticos.
+        await rotateSnapshot(get().state, 'delete');
+        set((s) => {
+          const st = s.state;
+          if (!st.competitions[competitionId] || competitionLockReason(st, competitionId)) return s;
+          const teams = omit(st.teams, (t) => t.competitionId === competitionId);
+          const jornadas = omit(st.jornadas, (j) => j.competitionId === competitionId);
+          const players = omit(st.players, (p) => !teams[p.teamId]);
+          const matches = omit(st.matches, (m) => !jornadas[m.jornadaId]);
+          const goals = omit(st.goals, (g) => !matches[g.matchId]);
+          const competitions = { ...st.competitions };
+          delete competitions[competitionId];
+          let activeId = st.activeCompetitionId;
+          if (activeId === competitionId) activeId = firstVisible(competitions);
+          const next: AppState = {
+            ...st,
+            competitions,
+            activeCompetitionId: activeId,
+            teams,
+            players,
+            jornadas,
+            matches,
+            goals,
+          };
+          return activeId === st.activeCompetitionId
+            ? { state: next }
+            : { state: next, ui: makeInitialUI(next) };
+        });
+      },
+
+      importTeams: (imports) =>
+        set((s) => {
+          const activeId = s.state.activeCompetitionId;
+          if (!activeId) return s;
+          return { state: { ...s.state, ...copyTeams(s.state, imports, activeId) } };
+        }),
+
       createTeam: (input) => {
-        const team = makeTeam({ ...input, name: input.name.trim() });
+        const activeId = get().state.activeCompetitionId;
+        if (!activeId) return '';
+        const team = makeTeam({ ...input, name: input.name.trim() }, activeId);
         set((s) => ({
           state: { ...s.state, teams: { ...s.state.teams, [team.id]: team } },
         }));
@@ -288,15 +480,20 @@ export const useStore = create<Store>()(
       },
 
       movePlayer: (playerId, toTeamId) =>
-        set((s) => ({
-          state: {
-            ...s.state,
-            players: {
-              ...s.state.players,
-              [playerId]: { ...s.state.players[playerId], teamId: toTeamId },
+        set((s) => {
+          // Un jugador nunca cruza de competición: cada una está totalmente separada.
+          const target = s.state.teams[toTeamId];
+          if (!target || playerCompetition(s.state, playerId) !== target.competitionId) return s;
+          return {
+            state: {
+              ...s.state,
+              players: {
+                ...s.state.players,
+                [playerId]: { ...s.state.players[playerId], teamId: toTeamId },
+              },
             },
-          },
-        })),
+          };
+        }),
 
       setPlayerActive: (playerId, active) =>
         set((s) => ({
@@ -321,6 +518,8 @@ export const useStore = create<Store>()(
         })),
 
       startJornada: (teamIds) => {
+        const competitionId = get().state.activeCompetitionId;
+        if (!competitionId) return '';
         const id = newId();
         const date = todayISODate();
         set((s) => ({
@@ -330,9 +529,12 @@ export const useStore = create<Store>()(
               ...s.state.jornadas,
               [id]: {
                 id,
+                competitionId,
                 date,
                 status: 'open',
-                teamIds: [...new Set(teamIds)].slice(0, MAX_JORNADA_TEAMS),
+                teamIds: [...new Set(teamIds)]
+                  .filter((t) => s.state.teams[t]?.competitionId === competitionId)
+                  .slice(0, MAX_JORNADA_TEAMS),
                 createdAt: nowISO(),
               },
             },
@@ -344,7 +546,9 @@ export const useStore = create<Store>()(
       addTeamToJornada: (jornadaId, teamId) =>
         set((s) => {
           const j = s.state.jornadas[jornadaId];
-          if (!j || !s.state.teams[teamId] || j.teamIds.includes(teamId)) return s;
+          const team = s.state.teams[teamId];
+          if (!j || !team || j.teamIds.includes(teamId)) return s;
+          if (team.competitionId !== j.competitionId) return s;
           if (j.teamIds.length >= MAX_JORNADA_TEAMS) return s;
           // Llega tarde: se forma detrás de los que ya esperaban al terminar la última
           // partida. Si todavía no se jugó ninguna, es como si hubiera llegado a tiempo.
@@ -433,6 +637,15 @@ export const useStore = create<Store>()(
         }),
 
       startMatch: (jornadaId, teamAId, teamBId) => {
+        const st = get().state;
+        const competitionId = jornadaCompetition(st, jornadaId);
+        if (
+          !competitionId ||
+          st.teams[teamAId]?.competitionId !== competitionId ||
+          st.teams[teamBId]?.competitionId !== competitionId
+        ) {
+          return '';
+        }
         const id = newId();
         const existing = Object.values(get().state.matches).filter(
           (m) => m.jornadaId === jornadaId
@@ -469,6 +682,10 @@ export const useStore = create<Store>()(
         set((s) => {
           const m = s.state.matches[matchId];
           if (!m) return s;
+          // Solo se presta a jugadores de la misma competición.
+          if (playerCompetition(s.state, entry.playerId) !== matchCompetition(s.state, matchId)) {
+            return s;
+          }
           const key = side === 'A' ? 'rosterA' : 'rosterB';
           if (m[key].some((e) => e.playerId === entry.playerId)) return s;
           return {
@@ -529,6 +746,10 @@ export const useStore = create<Store>()(
         }),
 
       addGoal: (matchId, playerId, scoringForTeamId, isLoaned) => {
+        const st = get().state;
+        if (playerId && playerCompetition(st, playerId) !== matchCompetition(st, matchId)) {
+          return '';
+        }
         const id = newId();
         set((s) => ({
           state: {
@@ -560,6 +781,12 @@ export const useStore = create<Store>()(
         set((s) => {
           const existing = s.state.goals[goalId];
           if (!existing) return s;
+          if (
+            opts.playerId &&
+            playerCompetition(s.state, opts.playerId) !== matchCompetition(s.state, existing.matchId)
+          ) {
+            return s;
+          }
           const { playerId: _omit, ...rest } = existing;
           void _omit;
           const updated = {
@@ -664,10 +891,7 @@ export const useStore = create<Store>()(
       back: () =>
         set((s) => {
           if (s.ui.history.length === 0) {
-            const fallback: Screen = s.state.config.onboardingDone
-              ? { name: 'home' }
-              : { name: 'onboarding' };
-            return { ui: { currentScreen: fallback, history: [] } };
+            return { ui: { currentScreen: homeScreen(s.state), history: [] } };
           }
           const next = s.ui.history[s.ui.history.length - 1];
           return {
@@ -679,14 +903,7 @@ export const useStore = create<Store>()(
         }),
 
       resetNavigationToHome: () =>
-        set((s) => ({
-          ui: {
-            currentScreen: s.state.config.onboardingDone
-              ? { name: 'home' }
-              : { name: 'onboarding' },
-            history: [],
-          },
-        })),
+        set((s) => ({ ui: makeInitialUI(s.state) })),
     }),
     {
       name: 'miercoles-app-state',
@@ -757,25 +974,34 @@ function sanitizeUI(ui: StoreData['ui'] | undefined, state: AppState): StoreData
   const screen = ui?.currentScreen;
   if (!screen) return fallback;
 
+  // Solo valen las pantallas de la competición activa.
+  const scoped = activeScope(state);
   const exists = (() => {
     switch (screen.name) {
       case 'team-detail':
-        return Boolean(state.teams[screen.teamId]);
+        return Boolean(scoped.teams[screen.teamId]);
       case 'jornada-active':
       case 'summary':
-        return Boolean(state.jornadas[screen.jornadaId]);
+        return Boolean(scoped.jornadas[screen.jornadaId]);
       case 'match-record':
-        return Boolean(state.matches[screen.matchId]);
+        return Boolean(scoped.matches[screen.matchId]);
       default:
         return true;
     }
   })();
 
   if (!exists) return fallback;
-  if (screen.name === 'jornada-setup' && Object.values(state.jornadas).some((j) => j.status === 'open')) {
+  if (
+    screen.name === 'jornada-setup' &&
+    Object.values(scoped.jornadas).some((j) => j.status === 'open')
+  ) {
     return fallback;
   }
-  if (screen.name === 'onboarding' && state.config.onboardingDone) return fallback;
+  // El onboarding de una competición nueva sigue valiendo; el de la primera, solo si hace falta.
+  if (screen.name === 'onboarding' && !screen.newCompetitionName && !needsOnboarding(state)) {
+    return fallback;
+  }
+  if (screen.name !== 'onboarding' && needsOnboarding(state)) return fallback;
   return { currentScreen: screen, history: [] };
 }
 

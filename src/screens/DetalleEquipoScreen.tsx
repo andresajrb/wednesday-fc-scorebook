@@ -22,6 +22,7 @@ import { KindOption } from '@/components/domain/TeamFormSheet';
 import { Button } from '@/components/primitives/Button';
 import { ConfirmDialog } from '@/components/primitives/ConfirmDialog';
 import { useStore } from '@/store/useStore';
+import { useScopedState } from '@/store/useScopedState';
 import {
   getActivePlayersByTeam,
   getInactivePlayersByTeam,
@@ -37,9 +38,9 @@ interface DetalleEquipoScreenProps {
 
 export function DetalleEquipoScreen({ teamId }: DetalleEquipoScreenProps) {
   const back = useStore((s) => s.back);
-  const team = useStore((s) => s.state.teams[teamId]);
-  const teams = useStore((s) => s.state.teams);
-  const state = useStore((s) => s.state);
+  const state = useScopedState();
+  const team = state.teams[teamId];
+  const teams = state.teams;
   const renameTeam = useStore((s) => s.renameTeam);
   const setTeamColor = useStore((s) => s.setTeamColor);
   const addPlayer = useStore((s) => s.addPlayer);

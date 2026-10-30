@@ -13,6 +13,7 @@ import { JornadaQueueCard } from '@/components/domain/JornadaQueueCard';
 import { JornadaTeamsSheet } from '@/components/domain/JornadaTeamsSheet';
 import { LiveStandings } from '@/components/domain/LiveStandings';
 import { useStore } from '@/store/useStore';
+import { useScopedState } from '@/store/useScopedState';
 import {
   getMatchesForJornada,
   getMatchScore,
@@ -33,7 +34,7 @@ interface JornadaActivaScreenProps {
 export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
   const back = useStore((s) => s.back);
   const navigate = useStore((s) => s.navigate);
-  const state = useStore((s) => s.state);
+  const state = useScopedState();
   const startMatch = useStore((s) => s.startMatch);
   const closeJornada = useStore((s) => s.closeJornada);
   const cancelMatch = useStore((s) => s.cancelMatch);
