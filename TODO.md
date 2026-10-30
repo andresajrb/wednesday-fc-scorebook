@@ -94,14 +94,22 @@ Cómo se ejecutaría:
 - Exportar/importar una sola competición: **queda para después** (cuando haga falta pasarla a otro
   teléfono; con el backend se reemplaza por un link).
 
-### [~] Tabla de temporada / período
-- Depende de: competiciones separadas (la temporada es por competición).
-Preguntas abiertas:
-- ¿Período fijo (mensual, anual) o "temporada" con inicio y fin definidos por el usuario? ¿Ambos?
-- ¿Qué se suma: puntos por partida (3/1/0), jornadas ganadas ("equipo del día"), o ambos?
-- Jugadores: los stats siguen a la persona aunque cambie de equipo (`Player.teamId` cambia).
-- ¿Cómo cuentan los goles de préstamo (`isLoaned`) y los goles sin asignar?
-- ¿Qué pasa con jugadores inactivos (soft delete) en tablas históricas?
+### [x] Tabla de temporada / período
+- Depende de: competiciones separadas (la temporada es por competición). ✅
+
+Decidido:
+- Dos tablas por competición: **mes** (quién ganó cada mes) y **temporada** (quién ganó el año).
+- Temporada = **año calendario por defecto**; el inicio se puede cambiar en Configuración.
+- Orden: **puntos acumulados** (3/1/0) → diferencia de gol → jornadas ganadas.
+  Columna extra de **jornadas ganadas** ("equipo del día").
+- Goleadores: los goles cuentan para el jugador aunque haya jugado **prestado**.
+  Los goles sin asignar solo cuentan para el equipo.
+- **Sin partidos jugados ni promedio** por jugador: la lista de la partida incluye a todos los
+  activos del equipo, hayan ido o no, así que no es un dato confiable. Se puede revisar después.
+- Jugadores inactivos **siguen apareciendo** con lo que hicieron.
+- Invitados compiten **igual que los fijos** y **pueden salir campeones**.
+- Pantalla **"Tabla"** desde el inicio, con pestañas **Mes** (eligiendo el mes, campeón destacado en los
+  meses terminados) y **Año**, cada una con tabla de equipos y goleadores.
 
 ### [~] Tabla de sequía (después de definir goleadores)
 - Depende de la definición de la tabla de goleadores/temporada.
