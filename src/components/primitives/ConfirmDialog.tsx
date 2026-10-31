@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from './Button';
 
 interface ConfirmDialogProps {
@@ -32,7 +33,8 @@ export function ConfirmDialog({
   }, [open, onCancel]);
 
   if (!open) return null;
-  return (
+  // Portal al body, igual que BottomSheet: un ancestro con blur encerraría el `fixed`.
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex flex-col justify-end sm:items-center sm:justify-center" role="dialog" aria-modal="true">
       <button
         className="absolute inset-0 bg-black/65 animate-fade-in"
@@ -60,6 +62,7 @@ export function ConfirmDialog({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

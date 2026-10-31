@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '@/lib/cn';
 
 interface BottomSheetProps {
@@ -30,7 +31,9 @@ export function BottomSheet({ open, onClose, title, children, className, dismiss
 
   if (!open) return null;
 
-  return (
+  // Portal al body: un ancestro con `backdrop-filter` (las cabeceras con blur) vuelve
+  // `fixed` relativo a él, y la hoja quedaba encerrada en el alto de la cabecera.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex flex-col justify-end" role="dialog" aria-modal="true">
       {dismissable ? (
         <button
@@ -53,6 +56,7 @@ export function BottomSheet({ open, onClose, title, children, className, dismiss
         {title && <div className="text-body-em font-semibold mb-3">{title}</div>}
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
