@@ -117,10 +117,14 @@ Decidido:
 - ¿Se muestra siempre o solo en el resumen como dato de humor?
 - Tono: humor sin humillar (¿opt-out por jugador?).
 
-### [~] Gráficos simples
-- Depende de la tabla de temporada.
-- ¿Cuáles? Goles por jornada, evolución de puntos por equipo, goles por jugador en el tiempo.
-- Librería: recharts (~100 KB) vs SVG propio liviano. Preferir liviano (PWA offline, datos móviles).
+### [x] Gráficos simples
+- En la pantalla **Tabla**, debajo de los goleadores; siguen la pestaña Mes / Año.
+- **Carrera por el título**: puntos acumulados por equipo jornada a jornada (líneas, color de cada
+  equipo, nombre al final de cada línea, leyenda y detalle al tocar).
+- **Goles por jornada**: barras con el total de goles de cada jornada (detalle al tocar).
+- Con menos de 2 jornadas en el período no se muestran.
+- SVG propio, sin librerías (PWA offline, datos móviles).
+- Pendiente si hace falta: goles por jugador en el tiempo (hoy quedaría casi vacío).
 
 ---
 
