@@ -5,10 +5,13 @@ import { Header } from '@/components/primitives/Header';
 import { IconButton } from '@/components/primitives/IconButton';
 import { Avatar } from '@/components/primitives/Avatar';
 import { StandingsTable } from '@/components/domain/StandingsTable';
+import { PointsRaceChart } from '@/components/charts/PointsRaceChart';
+import { GoalsBarChart } from '@/components/charts/GoalsBarChart';
 import { useStore } from '@/store/useStore';
 import { useScopedState } from '@/store/useScopedState';
 import {
   firstJornadaDate,
+  getPeriodSeries,
   getPeriodTable,
   monthPeriod,
   seasonPeriod,
@@ -41,6 +44,7 @@ export function TablaScreen() {
   const period = shiftPeriod(current, offset, startMonth);
   const table = useMemo(() => getPeriodTable(state, period, today), [state, period.start, period.end, today]);
 
+  const series = useMemo(() => getPeriodSeries(state, table), [state, table]);
   const first = firstJornadaDate(state);
   const canGoBack = first !== null && first < period.start;
   const canGoForward = offset < 0;
@@ -196,6 +200,35 @@ export function TablaScreen() {
                 </div>
               </section>
             )}
+
+            <section data-testid="period-charts">
+              <div className="text-caption uppercase tracking-wider text-text-2 font-semibold mb-2">
+                Gráficos
+              </div>
+              {series.points.length < 2 ? (
+                <p className="text-caption text-text-3 bg-bg-elev border border-border rounded-card p-3">
+                  Se verán con 2 jornadas o más en el período.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  <div className="bg-bg-elev border border-border rounded-card p-3">
+                    <div className="text-body-em font-semibold">Carrera por el título</div>
+                    <div className="text-caption text-text-2 mb-2">
+                      Puntos acumulados jornada a jornada. Toca para ver el detalle.
+                    </div>
+                    <PointsRaceChart series={series} />
+                  </div>
+                  <div className="bg-bg-elev border border-border rounded-card p-3">
+                    <div className="text-body-em font-semibold">Goles por jornada</div>
+                    <div className="text-caption text-text-2 mb-2">
+                      {series.points.reduce((sum, p) => sum + p.goals, 0)} goles en{' '}
+                      {series.points.length} jornadas.
+                    </div>
+                    <GoalsBarChart points={series.points} />
+                  </div>
+                </div>
+              )}
+            </section>
           </>
         )}
       </div>

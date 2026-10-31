@@ -169,3 +169,54 @@ export function firstJornadaDate(state: AppState): string | null {
   const dates = Object.values(state.jornadas).map((j) => j.date);
   return dates.length > 0 ? dates.sort()[0] : null;
 }
+
+export interface JornadaPoint {
+  jornadaId: ID;
+  date: string;
+  goals: number;
+  matches: number;
+  /** Puntos acumulados de cada equipo hasta esta jornada, incluida. */
+  cumulative: Record<ID, number>;
+}
+
+export interface PeriodSeries {
+  /** Equipos que jugaron en el período, en el orden de la tabla. */
+  teams: Team[];
+  points: JornadaPoint[];
+}
+
+/**
+ * Serie jornada a jornada del período, para los gráficos: puntos acumulados por equipo
+ * y goles de cada jornada. Solo cuentan las jornadas con alguna partida terminada.
+ */
+export function getPeriodSeries(state: AppState, table: PeriodTable): PeriodSeries {
+  const { period } = table;
+  const teams = table.standings.map((r) => r.team);
+  const totals: Record<ID, number> = Object.fromEntries(teams.map((t) => [t.id, 0]));
+  const jornadas = Object.values(state.jornadas)
+    .filter((j) => j.date >= period.start && j.date < period.end)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
+
+  const points: JornadaPoint[] = [];
+  for (const j of jornadas) {
+    const matches = Object.values(state.matches).filter(
+      (m) => m.jornadaId === j.id && m.endedAt && m.result !== null
+    );
+    if (matches.length === 0) continue;
+    const rows = new Map<ID, TeamStandingRow>();
+    for (const m of matches) {
+      for (const id of [m.teamAId, m.teamBId]) {
+        const team = state.teams[id];
+        if (team && !rows.has(id)) rows.set(id, emptyStandingRow(team));
+      }
+    }
+    accumulateMatches(state, matches, rows);
+    let goals = 0;
+    for (const r of rows.values()) {
+      goals += r.gf;
+      if (r.team.id in totals) totals[r.team.id] += r.pts;
+    }
+    points.push({ jornadaId: j.id, date: j.date, goals, matches: matches.length, cumulative: { ...totals } });
+  }
+  return { teams, points };
+}
