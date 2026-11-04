@@ -156,8 +156,24 @@ Fases:
    `state.tombstones` (las listas solo tienen lo vigente; en el servidor será la columna `deleted_at`).
    Lo marca `stampChanges` en un solo lugar, para todas las acciones. Importar un respaldo y
    "Borrar todo" no generan lápidas.
-1. El organizador crea el grupo en la nube y sus datos suben ("Respalda tus datos en la nube").
+1. ✅ (probado contra Supabase local) El organizador entra con link mágico y sube cada competición
+   desde Configuración › Nube; aviso descartable en el inicio. Los cambios se suben solos (también
+   al volver la señal). Esquema en `supabase/migrations/`: tabla `records` (una fila por registro,
+   con el registro en `data`), `members`, LWW en el servidor y `create_group`. Qué falta subir se
+   sabe por la versión exacta de cada registro (no por fecha: la hora del teléfono puede fallar).
+   Falta para producción: proyecto real de Supabase, variables en Vercel, URLs de redirección,
+   SMTP propio (el de Supabase manda muy pocos correos por hora) y el `pg_dump` nocturno.
 2. Otro teléfono entra con el link y los datos bajan.
+   Dinámica de invitación (decidido):
+   - Nadie más que el organizador usa email. El organizador lo da **una sola vez** (al subir su
+     primera competición) para recuperar sus grupos en otro teléfono.
+   - Los links se comparten por WhatsApp/Telegram con la hoja de compartir del teléfono
+     (Configuración › Nube › **Compartir**), con un mensaje listo ("Únete a Miércoles…").
+   - **Link de espectador**: reutilizable, se pega en el grupo de WhatsApp. Revocable.
+   - **Link de admin (anotador)**: personal, de un solo uso, vence en 7 días; se manda por privado.
+   - **Admin = anotador**: abre jornadas, anota goles y edita equipos. Invitar y sacar miembros
+     es solo del organizador.
+   - Quien abre el link entra con sesión anónima, sin registrarse, con el rol del link.
 3. Realtime + un anotador por partida (seguir el partido en vivo).
 4. Dominio nuevo + página pública.
 
