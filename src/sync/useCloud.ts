@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { ID } from '@/types/domain';
-import { setReadOnlyCompetitions, useStore } from '@/store/useStore';
+import { setCloudScorer, setReadOnlyCompetitions, useStore } from '@/store/useStore';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { rawStorage } from '@/store/persistence';
 import { cloudEnabled, supabase } from './client';
 import { pendingRows, type PushedVersions, type RecordRow } from './rows';
@@ -42,11 +43,15 @@ interface CloudData {
   links: Record<ID, CloudLink>;
   status: CloudStatus;
   error: string | null;
+  /** Aviso que queda hasta que se cierre (la sincronización no lo borra). */
+  notice: string | null;
   /** Email al que se mandó el link y todavía no se abrió. */
   linkSentTo: string | null;
   bannerDismissed: boolean;
   /** Mientras la nube está en prueba, solo se ve en el teléfono que la desbloqueó. */
   unlocked: boolean;
+  /** Nombre con el que entró (se muestra a los demás cuando anota una partida). */
+  displayName: string | null;
   /** Link de invitación abierto que falta aceptar. */
   pendingInvite: string | null;
   /** Link de espectadores de cada competición, para volver a compartirlo. */
@@ -69,6 +74,7 @@ interface CloudActions {
   removeMember(competitionId: ID, userId: ID): Promise<void>;
   dismissBanner(): void;
   clearError(): void;
+  clearNotice(): void;
   toggleUnlocked(): void;
 }
 
@@ -80,6 +86,8 @@ const SYNC_DEBOUNCE_MS = 2000;
 const RETRY_MS = 30_000;
 const POLL_MS = 30_000;
 const INVITE_PARAM = 'unirse';
+/** Un gol trae varias filas (gol + partida): se espera un poco para bajarlas juntas. */
+const LIVE_DEBOUNCE_MS = 300;
 
 /**
  * Estado de la nube en este teléfono. Va aparte de los datos (no viaja en los respaldos)
@@ -93,9 +101,11 @@ export const useCloud = create<CloudData & CloudActions>()(
       links: {},
       status: 'idle',
       error: null,
+      notice: null,
       linkSentTo: null,
       bannerDismissed: false,
       unlocked: false,
+      displayName: null,
       pendingInvite: null,
       viewerLinks: {},
       pushed: {},
@@ -155,7 +165,7 @@ export const useCloud = create<CloudData & CloudActions>()(
           throw new Error('No se pudo entrar. Revisa tu conexión e inténtalo de nuevo.');
         }
         linkCompetition(joined.competition_id, joined.role);
-        set({ pendingInvite: null, bannerDismissed: true });
+        set({ pendingInvite: null, bannerDismissed: true, displayName: name || null });
         await pullCompetition(joined.competition_id);
         useStore.getState().setActiveCompetition(joined.competition_id);
       },
@@ -229,6 +239,7 @@ export const useCloud = create<CloudData & CloudActions>()(
 
       dismissBanner: () => set({ bannerDismissed: true }),
       clearError: () => set({ error: null, status: 'idle' }),
+      clearNotice: () => set({ notice: null }),
       toggleUnlocked: () => set((s) => ({ unlocked: !s.unlocked })),
     }),
     {
@@ -241,6 +252,7 @@ export const useCloud = create<CloudData & CloudActions>()(
         unlocked: s.unlocked,
         pendingInvite: s.pendingInvite,
         viewerLinks: s.viewerLinks,
+        displayName: s.displayName,
       }),
       // Los links de antes de las invitaciones eran todos del organizador.
       merge: (persisted, current) => {
@@ -399,13 +411,54 @@ async function pushCompetition(competitionId: ID): Promise<void> {
   const rows = pendingRows(useStore.getState().state, competitionId, pushed);
   if (rows.length === 0) return;
   useCloud.setState({ status: 'syncing' });
+  const rejected: RecordRow[] = [];
   for (let i = 0; i < rows.length; i += UPSERT_CHUNK) {
-    const { error } = await supabase
-      .from('records')
-      .upsert(rows.slice(i, i + UPSERT_CHUNK), { onConflict: 'competition_id,table_name,id' });
-    if (error) throw new Error(error.message);
+    const chunk = rows.slice(i, i + UPSERT_CHUNK);
+    const { error } = await upsertRows(chunk);
+    if (!error) continue;
+    if (!LOCKED.test(error.message)) throw new Error(error.message);
+    // Alguien tomó el control de una partida mientras este teléfono anotaba sin señal:
+    // se sube fila por fila para quedarse solo con lo que el servidor rechaza.
+    for (const row of chunk) {
+      const { error: rowError } = await upsertRows([row]);
+      if (!rowError) continue;
+      if (!LOCKED.test(rowError.message)) throw new Error(rowError.message);
+      rejected.push(row);
+    }
   }
-  await markPushed(competitionId, rows, { lastPushAt: new Date().toISOString() });
+  const accepted = rows.filter((r) => !rejected.includes(r));
+  await markPushed(competitionId, accepted, { lastPushAt: new Date().toISOString() });
+  if (rejected.length > 0) await discardRejected(competitionId, rejected);
+}
+
+/** El servidor rechaza cambios en una partida que anota otra persona. */
+const LOCKED = /anotando/;
+
+function upsertRows(rows: RecordRow[]) {
+  return supabase!.from('records').upsert(rows, { onConflict: 'competition_id,table_name,id' });
+}
+
+/** Gana quien tomó el control: lo rechazado vuelve a como está en la nube. */
+async function discardRejected(competitionId: ID, rejected: RecordRow[]): Promise<void> {
+  if (!supabase) return;
+  const { data, error } = await supabase
+    .from('records')
+    .select('table_name, id, competition_id, data, updated_at, deleted_at')
+    .eq('competition_id', competitionId)
+    .in('id', rejected.map((r) => r.id));
+  if (error) throw new Error(error.message);
+  const remote = (data ?? []) as RecordRow[];
+  const store = useStore.getState();
+  const applied = store.applyRemote(remote, { force: true });
+  const missing = rejected.filter(
+    (r) => !remote.some((x) => x.id === r.id && x.table_name === r.table_name)
+  );
+  store.discardLocal(missing.map((r) => ({ table: r.table_name, id: r.id })));
+  const versions = [...applied, ...missing.map((r) => ({ ...r }))];
+  await markPushed(competitionId, versions, {});
+  useCloud.setState({
+    notice: 'Otra persona tomó el control de la partida: lo que anotaste sin señal no se guardó.',
+  });
 }
 
 async function pullCompetition(competitionId: ID): Promise<void> {
@@ -433,6 +486,32 @@ async function pullCompetition(competitionId: ID): Promise<void> {
   const applied = useStore.getState().applyRemote(rows);
   const pulledUpTo = rows.reduce((max, r) => (r.synced_at > max ? r.synced_at : max), '');
   await markPushed(competitionId, applied, { pulledUpTo });
+}
+
+const channels = new Map<ID, RealtimeChannel>();
+
+/** Cada competición en la nube avisa al instante cuando alguien cambia algo. */
+function syncChannels(): void {
+  if (!supabase) return;
+  const { links, userId } = useCloud.getState();
+  const wanted = new Set(userId ? Object.keys(links) : []);
+  for (const [id, channel] of channels) {
+    if (wanted.has(id)) continue;
+    void supabase.removeChannel(channel);
+    channels.delete(id);
+  }
+  for (const id of wanted) {
+    if (channels.has(id)) continue;
+    const channel = supabase
+      .channel(`records:${id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'records', filter: `competition_id=eq.${id}` },
+        () => scheduleSync(LIVE_DEBOUNCE_MS)
+      )
+      .subscribe();
+    channels.set(id, channel);
+  }
 }
 
 /** Lo que coincide con la nube no hace falta subirlo. */
@@ -497,15 +576,30 @@ export function startCloudSync(): void {
     if (user) scheduleSync(0);
   });
 
-  const applyReadOnly = (links: Record<ID, CloudLink>) =>
-    setReadOnlyCompetitions(
-      Object.entries(links)
-        .filter(([, link]) => link.role === 'viewer')
-        .map(([id]) => id)
+  const applyRoles = (s: CloudData) => {
+    const entries = Object.entries(s.links);
+    setReadOnlyCompetitions(entries.filter(([, l]) => l.role === 'viewer').map(([id]) => id));
+    setCloudScorer(
+      s.userId
+        ? {
+            id: s.userId,
+            name: s.displayName ?? s.email?.split('@')[0] ?? 'Organizador',
+            competitions: new Set(entries.filter(([, l]) => l.role !== 'viewer').map(([id]) => id)),
+          }
+        : null
     );
-  applyReadOnly(useCloud.getState().links);
+  };
+  applyRoles(useCloud.getState());
   useCloud.subscribe((s, prev) => {
-    if (s.links !== prev.links) applyReadOnly(s.links);
+    if (
+      s.links !== prev.links ||
+      s.userId !== prev.userId ||
+      s.displayName !== prev.displayName ||
+      s.email !== prev.email
+    ) {
+      applyRoles(s);
+    }
+    if (s.links !== prev.links || s.userId !== prev.userId) syncChannels();
   });
 
   useStore.subscribe((s, prev) => {

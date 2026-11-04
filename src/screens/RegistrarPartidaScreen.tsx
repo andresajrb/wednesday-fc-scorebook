@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ListOrdered, Flag, UserPlus, Trophy, Plus, Check, ShieldPlus, Play } from 'lucide-react';
+import { ArrowLeft, ListOrdered, Flag, UserPlus, Trophy, Plus, Check, ShieldPlus, Play, Hand, Radio } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { IconButton } from '@/components/primitives/IconButton';
 import { Button } from '@/components/primitives/Button';
@@ -13,6 +13,7 @@ import { MatchGoalsDrawer } from '@/components/domain/MatchGoalsDrawer';
 import { MatchReassignSheet, type ReassignPick } from '@/components/domain/MatchReassignSheet';
 import { useStore } from '@/store/useStore';
 import { useScopedState } from '@/store/useScopedState';
+import { syncNow, useCloud } from '@/sync/useCloud';
 import {
   getMatchScore,
   getGoalsByPlayerForMatch,
@@ -39,6 +40,11 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
   const addToRoster = useStore((s) => s.addToRoster);
   const addPlayer = useStore((s) => s.addPlayer);
   const startMatchClock = useStore((s) => s.startMatchClock);
+  const takeMatchControl = useStore((s) => s.takeMatchControl);
+  const myCloudId = useCloud((s) => s.userId);
+  const lostOffline = useCloud((s) => s.notice);
+  const clearNotice = useCloud((s) => s.clearNotice);
+  const [takeOverOpen, setTakeOverOpen] = useState(false);
 
   const matchDuration = useStore((s) => s.state.config.matchDurationSeconds);
 
@@ -106,6 +112,11 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
   }
 
   const isClosed = match.endedAt;
+  // La anota otra persona desde su teléfono: aquí se sigue en vivo, sin poder anotar.
+  const lockedBy =
+    !isClosed && match.scorerId && myCloudId && match.scorerId !== myCloudId
+      ? (match.scorerName ?? 'otra persona')
+      : null;
   const isFirst = match.type === 'first';
   const goalLimit = match.goalLimit;
   const clockNotStarted = !match.clockStartedAt && !isClosed;
@@ -230,13 +241,17 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
             isRunning={!isClosed}
           />
         </div>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="text-caption font-medium px-2.5 h-9 rounded-btn text-text-2 active:bg-bg-elev2"
-        >
-          Cancelar
-        </button>
+        {lockedBy ? (
+          <span className="w-9" />
+        ) : (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-caption font-medium px-2.5 h-9 rounded-btn text-text-2 active:bg-bg-elev2"
+          >
+            Cancelar
+          </button>
+        )}
       </header>
 
       {/* Scoreboard */}
@@ -290,7 +305,27 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
       </div>
 
       {/* Rosters o "Listo, empezar" mientras el cronómetro no arrancó */}
-      {clockNotStarted ? (
+      {lockedBy ? (
+        <div
+          data-locked-by={lockedBy}
+          className="flex-1 min-h-0 flex flex-col items-center justify-center px-6 py-8 gap-3 text-center"
+        >
+          <Radio size={22} className="text-accent" strokeWidth={1.75} />
+          <p className="text-body-em font-semibold">La está anotando {lockedBy}</p>
+          <p className="text-caption text-text-2 leading-relaxed max-w-sm">
+            El marcador se actualiza en vivo. Si {lockedBy} no puede seguir, toma el control
+            para anotar tú.
+          </p>
+          {lostOffline ? (
+            <div className="mt-2 max-w-sm rounded-btn border border-warning/40 bg-warning/10 p-3 space-y-2">
+              <p className="text-caption text-warning leading-relaxed">{lostOffline}</p>
+              <Button variant="ghost" size="sm" onClick={clearNotice}>
+                Entendido
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : clockNotStarted ? (
         <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-6 py-8 gap-5 text-center">
           <p className="text-body text-text-2 leading-relaxed max-w-sm">
             Cuando los equipos estén ubicados en cancha, tocá el botón para arrancar el cronómetro.
@@ -361,16 +396,42 @@ export function RegistrarPartidaScreen({ matchId }: RegistrarPartidaScreenProps)
       )}
 
       <StickyBottomCTA>
-        <Button
-          size="xl"
-          fullWidth
-          leading={<Flag size={18} strokeWidth={1.75} />}
-          onClick={onFinish}
-          disabled={clockNotStarted}
-        >
-          Finalizar partida
-        </Button>
+        {lockedBy ? (
+          <Button
+            size="xl"
+            fullWidth
+            variant="secondary"
+            leading={<Hand size={18} strokeWidth={1.75} />}
+            onClick={() => setTakeOverOpen(true)}
+          >
+            Tomar control
+          </Button>
+        ) : (
+          <Button
+            size="xl"
+            fullWidth
+            leading={<Flag size={18} strokeWidth={1.75} />}
+            onClick={onFinish}
+            disabled={clockNotStarted}
+          >
+            Finalizar partida
+          </Button>
+        )}
       </StickyBottomCTA>
+
+      <ConfirmDialog
+        open={takeOverOpen}
+        title="Tomar control"
+        description={`Desde ahora anotas tú esta partida. ${lockedBy ?? ''} ya no podrá anotar en ella; lo que haya anotado sin señal no se guarda.`}
+        confirmLabel="Tomar control"
+        onCancel={() => setTakeOverOpen(false)}
+        onConfirm={() => {
+          takeMatchControl(match.id);
+          setTakeOverOpen(false);
+          // Sin esperar: mientras no llegue a la nube, el otro todavía puede anotar.
+          void syncNow();
+        }}
+      />
 
       <BottomSheet
         open={!!borrowFor}

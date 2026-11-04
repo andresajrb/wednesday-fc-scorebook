@@ -73,6 +73,20 @@ export function recordCompetition(state: AppState, table: SyncTable, id: ID): ID
   }
 }
 
+/** Partidas tocadas entre dos estados: las que cambian y las de los goles que cambian. */
+export function touchedMatches(prev: AppState, next: AppState): Set<ID> {
+  const out = new Set<ID>();
+  if (prev.matches !== next.matches) {
+    for (const [id, m] of Object.entries(next.matches)) if (prev.matches[id] !== m) out.add(id);
+    for (const id of Object.keys(prev.matches)) if (!next.matches[id]) out.add(id);
+  }
+  if (prev.goals !== next.goals) {
+    for (const [id, g] of Object.entries(next.goals)) if (prev.goals[id] !== g) out.add(g.matchId);
+    for (const [id, g] of Object.entries(prev.goals)) if (!next.goals[id]) out.add(g.matchId);
+  }
+  return out;
+}
+
 /** Competiciones cuyos registros cambian entre dos estados. */
 export function touchedCompetitions(prev: AppState, next: AppState): Set<ID> {
   const out = new Set<ID>();

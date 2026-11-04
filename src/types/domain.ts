@@ -78,6 +78,12 @@ export interface Match {
    */
   clockStartedAt?: string;
   endedAt?: string;
+  /**
+   * En una competición en la nube, quién la anota (usuario de la nube). Los demás la ven
+   * en vivo y pueden "tomar el control"; el servidor rechaza goles de cualquier otro.
+   */
+  scorerId?: ID;
+  scorerName?: string;
   /** Último cambio del registro: decide qué versión gana al sincronizar. */
   updatedAt: string;
 }

@@ -171,6 +171,15 @@ export function CloudSection() {
               );
             })}
             {joinedOnly ? <div className="border-t border-border">{emailForm}</div> : null}
+            {cloud.notice ? (
+              <div className="p-3 border-t border-border flex items-start gap-2 text-caption text-warning leading-relaxed">
+                <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" strokeWidth={1.75} />
+                <span className="flex-1">{cloud.notice}</span>
+                <button type="button" className="text-text-2 font-medium" onClick={cloud.clearNotice}>
+                  Cerrar
+                </button>
+              </div>
+            ) : null}
             {cloud.error ? (
               <div className="p-3 border-t border-border flex items-start gap-2 text-caption text-error leading-relaxed">
                 <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" strokeWidth={1.75} />

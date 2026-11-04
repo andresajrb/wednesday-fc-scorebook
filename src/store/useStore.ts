@@ -38,7 +38,7 @@ import {
 import { clearSnapshots, looksLikeDataLoss, rotateSnapshot, writeBootSnapshot } from './snapshots';
 import { migrateAppState } from './migrations';
 import { activeScope, playerCompetition } from './scope';
-import { stampChanges, touchedCompetitions } from './stamps';
+import { stampChanges, touchedCompetitions, touchedMatches } from './stamps';
 import type { RecordRow } from '@/sync/rows';
 import { todayISODate } from '@/lib/format';
 
@@ -107,6 +107,8 @@ interface StoreActions {
   finishMatch(matchId: ID, drawWinnerNext?: ID): void;
   cancelMatch(matchId: ID): void;
   startMatchClock(matchId: ID): void;
+  /** Pasa a anotar una partida que estaba anotando otra persona. */
+  takeMatchControl(matchId: ID): void;
 
   // Goals
   addGoal(
@@ -134,7 +136,9 @@ interface StoreActions {
 
   // Nube
   /** Aplica registros bajados de la nube. Devuelve los que quedaron (o ya estaban) así. */
-  applyRemote(rows: RecordRow[]): RecordRow[];
+  applyRemote(rows: RecordRow[], opts?: { force?: boolean }): RecordRow[];
+  /** Quita registros que la nube rechazó y nunca llegaron a ella (sin lápida). */
+  discardLocal(items: Array<{ table: SyncTable; id: ID }>): void;
 
   // Backup / reset
   replaceState(next: AppState): void;
@@ -305,6 +309,14 @@ export function isReadOnlyCompetition(id: ID | null): boolean {
   return id !== null && readOnlyCompetitions.has(id);
 }
 
+/** Quién anota desde este teléfono en las competiciones en la nube (null = nadie). */
+let cloudScorer: { id: ID; name: string; competitions: ReadonlySet<ID> } | null = null;
+let takingControl = false;
+
+export function setCloudScorer(scorer: typeof cloudScorer): void {
+  cloudScorer = scorer;
+}
+
 function withoutStamps(fn: () => void): void {
   stampsPaused = true;
   try {
@@ -330,6 +342,13 @@ function withStamps(
         if (readOnlyCompetitions.size > 0) {
           for (const cid of touchedCompetitions(s.state, p.state)) {
             if (readOnlyCompetitions.has(cid)) return { ...p, state: s.state };
+          }
+        }
+        // Una partida que anota otra persona no se toca (salvo para tomar el control).
+        if (cloudScorer && !takingControl) {
+          for (const mid of touchedMatches(s.state, p.state)) {
+            const owner = s.state.matches[mid]?.scorerId;
+            if (owner && owner !== cloudScorer.id) return { ...p, state: s.state };
           }
         }
         return { ...p, state: stampChanges(s.state, p.state, nowISO()) };
@@ -742,6 +761,9 @@ export const useStore = create<Store>()(
           rosterB,
           startedAt: nowISO(),
           updatedAt: nowISO(),
+          ...(cloudScorer?.competitions.has(competitionId)
+            ? { scorerId: cloudScorer.id, scorerName: cloudScorer.name }
+            : {}),
         };
         set((s) => ({
           state: { ...s.state, matches: { ...s.state.matches, [id]: match } },
@@ -815,6 +837,29 @@ export const useStore = create<Store>()(
             },
           };
         }),
+
+      takeMatchControl: (matchId) => {
+        const scorer = cloudScorer;
+        if (!scorer) return;
+        takingControl = true;
+        try {
+          set((s) => {
+            const m = s.state.matches[matchId];
+            if (!m || m.scorerId === scorer.id) return s;
+            return {
+              state: {
+                ...s.state,
+                matches: {
+                  ...s.state.matches,
+                  [matchId]: { ...m, scorerId: scorer.id, scorerName: scorer.name },
+                },
+              },
+            };
+          });
+        } finally {
+          takingControl = false;
+        }
+      },
 
       addGoal: (matchId, playerId, scoringForTeamId, isLoaned) => {
         const st = get().state;
@@ -921,7 +966,7 @@ export const useStore = create<Store>()(
           };
         }),
 
-      applyRemote: (rows) => {
+      applyRemote: (rows, opts = {}) => {
         const applied: RecordRow[] = [];
         withoutStamps(() =>
           set((s) => {
@@ -936,10 +981,12 @@ export const useStore = create<Store>()(
               const tomb = (tombstones ?? st.tombstones)[row.id];
               const localVersion = local?.updatedAt ?? tomb?.deletedAt;
               // Lo de este teléfono es más nuevo: gana y se sube en la próxima pasada.
-              if (localVersion && localVersion > version) continue;
+              if (!opts.force && localVersion && localVersion > version) continue;
               const normalized = { ...row, updated_at: version };
               applied.push(normalized);
-              if (localVersion === version && Boolean(row.deleted_at) === !local) continue;
+              if (localVersion === version && Boolean(row.deleted_at) === !local && !opts.force) {
+                continue;
+              }
               const records = (tables[table] ??= { ...st[table] } as Record<ID, { updatedAt: string }>);
               tombstones ??= { ...st.tombstones };
               if (row.deleted_at) {
@@ -966,6 +1013,22 @@ export const useStore = create<Store>()(
         );
         return applied;
       },
+
+      discardLocal: (items) =>
+        withoutStamps(() =>
+          set((s) => {
+            const tables: Partial<Record<SyncTable, Record<ID, unknown>>> = {};
+            for (const { table, id } of items) {
+              const current = (tables[table] ?? s.state[table]) as Record<ID, unknown>;
+              if (!current[id]) continue;
+              const records = (tables[table] ??= { ...s.state[table] } as Record<ID, unknown>);
+              delete records[id];
+            }
+            if (Object.keys(tables).length === 0) return s;
+            const next = { ...s.state, ...tables } as AppState;
+            return { state: next, ui: sanitizeUI(s.ui, next) };
+          })
+        ),
 
       replaceState: (next) => {
         // Guardamos lo que había ANTES de pisarlo: importar un respaldo
