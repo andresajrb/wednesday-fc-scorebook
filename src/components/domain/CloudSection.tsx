@@ -3,20 +3,20 @@ import { CloudUpload, Check, Mail, LogOut, RefreshCw, AlertTriangle } from 'luci
 import { Button } from '@/components/primitives/Button';
 import { useStore } from '@/store/useStore';
 import { getArchivedCompetitions, getVisibleCompetitions } from '@/store/scope';
-import { cloudEnabled } from '@/sync/client';
-import { pushPending, useCloud } from '@/sync/useCloud';
+import { pushPending, useCloud, useCloudVisible } from '@/sync/useCloud';
 import { pendingRows } from '@/sync/rows';
 
 /** Configuración › Nube: entrar con email y subir cada competición como un grupo. */
 export function CloudSection() {
   const cloud = useCloud();
+  const visible = useCloudVisible();
   const state = useStore((s) => s.state);
   const [email, setEmail] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [uploading, setUploading] = useState<string | null>(null);
 
-  if (!cloudEnabled) return null;
+  if (!visible) return null;
 
   const competitions = [...getVisibleCompetitions(state), ...getArchivedCompetitions(state)];
 

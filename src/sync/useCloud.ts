@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import type { ID } from '@/types/domain';
 import { useStore } from '@/store/useStore';
 import { rawStorage } from '@/store/persistence';
-import { supabase } from './client';
+import { cloudEnabled, supabase } from './client';
 import { pendingRows, type PushedVersions } from './rows';
 
 /** Competición subida a la nube desde este teléfono. */
@@ -26,6 +26,8 @@ interface CloudData {
   /** Email al que se mandó el link y todavía no se abrió. */
   linkSentTo: string | null;
   bannerDismissed: boolean;
+  /** Mientras la nube está en prueba, solo se ve en el teléfono que la desbloqueó. */
+  unlocked: boolean;
   /** Por competición, la versión de cada registro que ya está en la nube. */
   pushed: Record<ID, PushedVersions>;
   /** Falso hasta leer `pushed` del disco: antes no se sabe qué falta subir. */
@@ -38,6 +40,7 @@ interface CloudActions {
   uploadCompetition(competitionId: ID): Promise<void>;
   dismissBanner(): void;
   clearError(): void;
+  toggleUnlocked(): void;
 }
 
 const UPSERT_CHUNK = 500;
@@ -57,6 +60,7 @@ export const useCloud = create<CloudData & CloudActions>()(
       error: null,
       linkSentTo: null,
       bannerDismissed: false,
+      unlocked: false,
       pushed: {},
       pushedLoaded: false,
 
@@ -99,6 +103,7 @@ export const useCloud = create<CloudData & CloudActions>()(
 
       dismissBanner: () => set({ bannerDismissed: true }),
       clearError: () => set({ error: null, status: 'idle' }),
+      toggleUnlocked: () => set((s) => ({ unlocked: !s.unlocked })),
     }),
     {
       name: 'miercoles-cloud',
@@ -107,10 +112,21 @@ export const useCloud = create<CloudData & CloudActions>()(
         links: s.links,
         linkSentTo: s.linkSentTo,
         bannerDismissed: s.bannerDismissed,
+        unlocked: s.unlocked,
       }),
     }
   )
 );
+
+/**
+ * La nube se muestra si este build la trae y el teléfono la desbloqueó (o ya la usa: tiene
+ * sesión o competiciones en la nube).
+ */
+export function useCloudVisible(): boolean {
+  return useCloud(
+    (s) => cloudEnabled && (s.unlocked || s.email !== null || Object.keys(s.links).length > 0)
+  );
+}
 
 function authErrorMessage(message: string): string {
   if (/rate limit|security purposes/i.test(message)) {

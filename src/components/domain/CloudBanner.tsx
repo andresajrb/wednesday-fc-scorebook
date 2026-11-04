@@ -1,7 +1,6 @@
 import { CloudUpload, X } from 'lucide-react';
 import { useStore } from '@/store/useStore';
-import { cloudEnabled } from '@/sync/client';
-import { useCloud } from '@/sync/useCloud';
+import { useCloud, useCloudVisible } from '@/sync/useCloud';
 
 /** Aviso del inicio mientras la competición activa siga solo en el teléfono. */
 export function CloudBanner() {
@@ -10,8 +9,9 @@ export function CloudBanner() {
   const linked = useCloud((s) => (activeId ? Boolean(s.links[activeId]) : false));
   const dismissed = useCloud((s) => s.bannerDismissed);
   const dismiss = useCloud((s) => s.dismissBanner);
+  const visible = useCloudVisible();
 
-  if (!cloudEnabled || !activeId || linked || dismissed) return null;
+  if (!visible || !activeId || linked || dismissed) return null;
 
   return (
     <div className="flex items-center gap-3 rounded-card p-3.5 border border-accent/40 bg-accent-soft">

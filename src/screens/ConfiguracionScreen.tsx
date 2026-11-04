@@ -23,6 +23,8 @@ import { getSortedTeams } from '@/store/selectors';
 import { activeScope } from '@/store/scope';
 import { CompetitionsManager } from '@/components/domain/CompetitionsManager';
 import { CloudSection } from '@/components/domain/CloudSection';
+import { cloudEnabled } from '@/sync/client';
+import { useCloud } from '@/sync/useCloud';
 import { playTestAlert } from '@/lib/alerts';
 import { downloadBackup, downloadBackupFile, readBackupFile, BackupError } from '@/lib/backup';
 import { COLOR_SWATCHES } from '@/lib/colors';
@@ -486,7 +488,7 @@ export function ConfiguracionScreen() {
             Acerca de
           </div>
           <div className="bg-bg-elev border border-border rounded-card overflow-hidden">
-            <InfoRow label="Versión" value="0.2.0" />
+            <VersionRow />
             <InfoRow label="Schema" value={`v${SCHEMA_VERSION}`} />
             <InfoRow
               label="Almacenamiento persistente"
@@ -657,6 +659,36 @@ export function ConfiguracionScreen() {
         </div>
       )}
     </ScreenShell>
+  );
+}
+
+const UNLOCK_TAPS = 5;
+
+/** Tocar la versión 5 veces muestra (u oculta) la nube mientras está en prueba. */
+function VersionRow() {
+  const unlocked = useCloud((s) => s.unlocked);
+  const toggleUnlocked = useCloud((s) => s.toggleUnlocked);
+  const taps = useRef({ count: 0, at: 0 });
+  if (!cloudEnabled) return <InfoRow label="Versión" value="0.2.0" />;
+  const onTap = () => {
+    const now = Date.now();
+    taps.current.count = now - taps.current.at < 1500 ? taps.current.count + 1 : 1;
+    taps.current.at = now;
+    if (taps.current.count < UNLOCK_TAPS) return;
+    taps.current.count = 0;
+    toggleUnlocked();
+  };
+  return (
+    <button
+      type="button"
+      onClick={onTap}
+      className="w-full flex items-center gap-3 p-3 border-t border-border first:border-t-0 text-left"
+    >
+      <span className="flex-1 text-body text-text-2">Versión</span>
+      <span className="text-body font-mono text-text font-medium">
+        0.2.0{unlocked ? ' · nube' : ''}
+      </span>
+    </button>
   );
 }
 
