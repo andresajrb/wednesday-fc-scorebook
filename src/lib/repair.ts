@@ -1,9 +1,21 @@
-import type { AppState, Competition, Goal, ID, Jornada, Match, Player, Team } from '@/types/domain';
+import type {
+  AppState,
+  Competition,
+  Goal,
+  ID,
+  Jornada,
+  Match,
+  Player,
+  Team,
+  Tombstone,
+} from '@/types/domain';
 import {
   DEFAULT_COMPETITION_NAME,
   DEFAULT_MATCH_DURATION_SECONDS,
   SCHEMA_VERSION,
+  SYNC_TABLES,
 } from '@/types/domain';
+import { lastKnownChange } from '@/store/migrations';
 
 export interface RepairReport {
   /** Cómo se logró parsear el blob crudo. */
@@ -142,6 +154,7 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
       name,
       archived: c.archived === true,
       createdAt: str(c.createdAt) ?? new Date(0).toISOString(),
+      updatedAt: str(c.updatedAt) ?? lastKnownChange(c),
     };
   });
   // Datos de antes de v6 (o sin competiciones legibles): todo va a "Miércoles".
@@ -153,11 +166,13 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
       fallbackCompetitionId =
         Object.values(competitions).find((c) => !c.archived)?.id ?? `c-${Date.now().toString(36)}`;
       if (!competitions[fallbackCompetitionId]) {
+        const now = new Date().toISOString();
         competitions[fallbackCompetitionId] = {
           id: fallbackCompetitionId,
           name: DEFAULT_COMPETITION_NAME,
           archived: false,
-          createdAt: new Date().toISOString(),
+          createdAt: now,
+          updatedAt: now,
         };
       }
     }
@@ -177,6 +192,7 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
       kind: t.kind === 'guest' ? 'guest' : 'fixed',
       archived: t.archived === true,
       createdAt: str(t.createdAt) ?? new Date(0).toISOString(),
+      updatedAt: str(t.updatedAt) ?? lastKnownChange(t),
     };
   });
 
@@ -207,6 +223,7 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
       teamId,
       active: p.active !== false,
       createdAt: str(p.createdAt) ?? new Date(0).toISOString(),
+      updatedAt: str(p.updatedAt) ?? lastKnownChange(p),
     };
   });
 
@@ -240,6 +257,7 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
       notes: typeof j.notes === 'string' ? j.notes : undefined,
       createdAt: str(j.createdAt) ?? new Date(0).toISOString(),
       closedAt: str(j.closedAt) ?? undefined,
+      updatedAt: str(j.updatedAt) ?? lastKnownChange(j),
     };
   });
 
@@ -292,6 +310,7 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
       startedAt: str(m.startedAt) ?? new Date(0).toISOString(),
       clockStartedAt: str(m.clockStartedAt) ?? undefined,
       endedAt: str(m.endedAt) ?? undefined,
+      updatedAt: str(m.updatedAt) ?? lastKnownChange(m),
     };
   });
 
@@ -333,8 +352,20 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
       scoringForTeamId,
       isLoaned: g.isLoaned === true,
       createdAt: str(g.createdAt) ?? new Date(0).toISOString(),
+      updatedAt: str(g.updatedAt) ?? lastKnownChange(g),
     };
   });
+
+  // Las lápidas de lo que sobrevivió sobran: el registro sigue vivo.
+  const tombstones = records<Tombstone>(source.tombstones, (t) => {
+    const table = SYNC_TABLES.find((name) => name === t.table);
+    const deletedAt = str(t.deletedAt);
+    return table && deletedAt ? { table, deletedAt } : null;
+  });
+  for (const id of Object.keys(tombstones)) {
+    const table = tombstones[id].table;
+    if ({ competitions, teams, players, jornadas, matches, goals }[table][id]) delete tombstones[id];
+  }
 
   const configSource = isObj(source.config) ? source.config : {};
   const sourceActive = str(source.activeCompetitionId);
@@ -351,6 +382,7 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
     jornadas,
     matches,
     goals,
+    tombstones,
     config: {
       onboardingDone: teamIds.length > 0 || configSource.onboardingDone === true,
       createdAt: str(configSource.createdAt) ?? new Date().toISOString(),

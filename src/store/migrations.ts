@@ -2,6 +2,7 @@ import {
   DEFAULT_COMPETITION_NAME,
   DEFAULT_MATCH_DURATION_SECONDS,
   SCHEMA_VERSION,
+  SYNC_TABLES,
   type AppState,
 } from '@/types/domain';
 
@@ -169,7 +170,38 @@ const migrations: Record<number, MigrationFn> = {
       jornadas: withCompetition(jornadasIn),
     };
   },
+  7: (data) => {
+    // v7: preparación para sincronizar. Cada registro recibe `updatedAt` (la última
+    // fecha que ya conocíamos de él) y aparece la lista de lápidas, vacía.
+    const d = data as Record<string, unknown>;
+    const isObj = (x: unknown): x is Record<string, unknown> =>
+      typeof x === 'object' && x !== null && !Array.isArray(x);
+    const out: Record<string, unknown> = { ...d };
+    for (const table of SYNC_TABLES) {
+      const records = d[table];
+      if (!isObj(records)) continue;
+      const stamped: Record<string, unknown> = {};
+      for (const [id, r] of Object.entries(records)) {
+        stamped[id] = isObj(r) && typeof r.updatedAt !== 'string'
+          ? { ...r, updatedAt: lastKnownChange(r) }
+          : r;
+      }
+      out[table] = stamped;
+    }
+    out.tombstones = isObj(d.tombstones) ? d.tombstones : {};
+    return out;
+  },
 };
+
+/** La fecha más reciente que trae un registro (creado, empezado, terminado, cerrado). */
+export function lastKnownChange(record: Record<string, unknown>): string {
+  let latest = '';
+  for (const key of ['createdAt', 'startedAt', 'clockStartedAt', 'endedAt', 'closedAt']) {
+    const v = record[key];
+    if (typeof v === 'string' && v > latest) latest = v;
+  }
+  return latest || new Date(0).toISOString();
+}
 
 export function migrate(data: unknown, fromVersion: number, toVersion: number): unknown {
   let current = data;

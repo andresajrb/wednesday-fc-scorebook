@@ -1,6 +1,6 @@
 export type ID = string;
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const DEFAULT_MATCH_DURATION_SECONDS = 7 * 60;
 
@@ -20,6 +20,8 @@ export interface Competition {
   name: string;
   archived: boolean;
   createdAt: string;
+  /** Último cambio del registro: decide qué versión gana al sincronizar. */
+  updatedAt: string;
 }
 
 /** `guest`: equipo que viene a cubrir cuando uno fijo no puede. */
@@ -34,6 +36,8 @@ export interface Team {
   /** Archivado: no aparece para jugar, pero su historial se conserva. */
   archived: boolean;
   createdAt: string;
+  /** Último cambio del registro: decide qué versión gana al sincronizar. */
+  updatedAt: string;
 }
 
 export interface Player {
@@ -42,6 +46,8 @@ export interface Player {
   teamId: ID;
   active: boolean;
   createdAt: string;
+  /** Último cambio del registro: decide qué versión gana al sincronizar. */
+  updatedAt: string;
 }
 
 export type MatchType = 'first' | 'normal';
@@ -72,6 +78,8 @@ export interface Match {
    */
   clockStartedAt?: string;
   endedAt?: string;
+  /** Último cambio del registro: decide qué versión gana al sincronizar. */
+  updatedAt: string;
 }
 
 export interface Goal {
@@ -82,6 +90,8 @@ export interface Goal {
   scoringForTeamId: ID;
   isLoaned: boolean;
   createdAt: string;
+  /** Último cambio del registro: decide qué versión gana al sincronizar. */
+  updatedAt: string;
 }
 
 export type JornadaStatus = 'open' | 'closed';
@@ -100,7 +110,30 @@ export interface Jornada {
   lateJoins?: Record<ID, number>;
   notes?: string;
   createdAt: string;
+  /** Último cambio del registro: decide qué versión gana al sincronizar. */
+  updatedAt: string;
   closedAt?: string;
+}
+
+/** Colecciones que se sincronizan registro a registro. */
+export type SyncTable = 'competitions' | 'teams' | 'players' | 'jornadas' | 'matches' | 'goals';
+
+export const SYNC_TABLES: readonly SyncTable[] = [
+  'competitions',
+  'teams',
+  'players',
+  'jornadas',
+  'matches',
+  'goals',
+];
+
+/**
+ * Registro borrado. Las listas solo tienen lo vigente; la lápida queda para que los
+ * otros dispositivos se enteren del borrado al sincronizar.
+ */
+export interface Tombstone {
+  table: SyncTable;
+  deletedAt: string;
 }
 
 export interface AppConfig {
@@ -129,6 +162,7 @@ export interface AppState {
   jornadas: Record<ID, Jornada>;
   matches: Record<ID, Match>;
   goals: Record<ID, Goal>;
+  tombstones: Record<ID, Tombstone>;
   config: AppConfig;
 }
 

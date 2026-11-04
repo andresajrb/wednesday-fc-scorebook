@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { create, type StateCreator } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type {
   AppConfig,
@@ -37,6 +37,7 @@ import {
 import { clearSnapshots, looksLikeDataLoss, rotateSnapshot, writeBootSnapshot } from './snapshots';
 import { migrateAppState } from './migrations';
 import { activeScope, playerCompetition } from './scope';
+import { stampChanges } from './stamps';
 import { todayISODate } from '@/lib/format';
 
 const newId = (): ID =>
@@ -184,6 +185,7 @@ function makeInitialState(): AppState {
     jornadas: {},
     matches: {},
     goals: {},
+    tombstones: {},
     config: {
       onboardingDone: false,
       createdAt: nowISO(),
@@ -200,6 +202,7 @@ function makeTeam(
   input: { name: string; color: string; kind?: TeamKind },
   competitionId: ID
 ): Team {
+  const now = nowISO();
   return {
     id: newId(),
     competitionId,
@@ -207,12 +210,14 @@ function makeTeam(
     color: input.color,
     kind: input.kind ?? 'fixed',
     archived: false,
-    createdAt: nowISO(),
+    createdAt: now,
+    updatedAt: now,
   };
 }
 
 function makeCompetition(name: string): Competition {
-  return { id: newId(), name, archived: false, createdAt: nowISO() };
+  const now = nowISO();
+  return { id: newId(), name, archived: false, createdAt: now, updatedAt: now };
 }
 
 /**
@@ -234,7 +239,15 @@ function copyTeams(
     for (const p of Object.values(state.players)) {
       if (p.teamId !== teamId || !p.active) continue;
       const id = newId();
-      players[id] = { id, name: p.name, teamId: team.id, active: true, createdAt: nowISO() };
+      const now = nowISO();
+      players[id] = {
+        id,
+        name: p.name,
+        teamId: team.id,
+        active: true,
+        createdAt: now,
+        updatedAt: now,
+      };
     }
   }
   return { teams, players };
@@ -272,11 +285,43 @@ function matchCompetition(state: AppState, matchId: ID): ID | null {
   return m ? jornadaCompetition(state, m.jornadaId) : null;
 }
 
+/** Mientras está activo, `set` guarda el estado tal cual, sin marcar cambios. */
+let stampsPaused = false;
+
+function withoutStamps(fn: () => void): void {
+  stampsPaused = true;
+  try {
+    fn();
+  } finally {
+    stampsPaused = false;
+  }
+}
+
+/**
+ * Cada cambio de `state` pasa por `stampChanges`: así todo registro tocado queda con su
+ * `updatedAt` y todo borrado con su lápida, que es lo que necesita la sincronización.
+ */
+function withStamps(
+  creator: StateCreator<Store, [['zustand/persist', unknown]], []>
+): StateCreator<Store, [['zustand/persist', unknown]], []> {
+  return (set, get, api) => {
+    const stampingSet = ((partial: Store | Partial<Store> | ((s: Store) => Store | Partial<Store>)) => {
+      if (stampsPaused) return set(partial);
+      set((s) => {
+        const p = typeof partial === 'function' ? partial(s) : partial;
+        if (!p.state || p.state === s.state) return p;
+        return { ...p, state: stampChanges(s.state, p.state, nowISO()) };
+      });
+    }) as typeof set;
+    return creator(stampingSet, get, api);
+  };
+}
+
 const initialState = makeInitialState();
 
 export const useStore = create<Store>()(
   persist(
-    (set, get) => ({
+    withStamps((set, get) => ({
       state: initialState,
       ui: makeInitialUI(initialState),
       hydrateError: null,
@@ -473,6 +518,7 @@ export const useStore = create<Store>()(
                 teamId,
                 active: true,
                 createdAt: nowISO(),
+                updatedAt: nowISO(),
               },
             },
           },
@@ -537,6 +583,7 @@ export const useStore = create<Store>()(
                   .filter((t) => s.state.teams[t]?.competitionId === competitionId)
                   .slice(0, MAX_JORNADA_TEAMS),
                 createdAt: nowISO(),
+                updatedAt: nowISO(),
               },
             },
           },
@@ -672,6 +719,7 @@ export const useStore = create<Store>()(
           rosterA,
           rosterB,
           startedAt: nowISO(),
+          updatedAt: nowISO(),
         };
         set((s) => ({
           state: { ...s.state, matches: { ...s.state.matches, [id]: match } },
@@ -764,6 +812,7 @@ export const useStore = create<Store>()(
                 scoringForTeamId,
                 isLoaned,
                 createdAt: nowISO(),
+                updatedAt: nowISO(),
               },
             },
           },
@@ -856,11 +905,14 @@ export const useStore = create<Store>()(
         void rotateSnapshot(get().state, 'import');
         clearHydrationFailure();
         unlockWrites();
-        set(() => ({
-          state: next,
-          ui: { currentScreen: { name: 'home' }, history: [] },
-          hydrateError: null,
-        }));
+        // El respaldo se restaura tal cual, con sus propias fechas y lápidas.
+        withoutStamps(() =>
+          set(() => ({
+            state: next,
+            ui: { currentScreen: { name: 'home' }, history: [] },
+            hydrateError: null,
+          }))
+        );
       },
 
       resetAll: async () => {
@@ -871,10 +923,13 @@ export const useStore = create<Store>()(
         // cuando la hidratación falló.
         clearHydrationFailure();
         unlockWrites();
-        set(() => ({
-          state: fresh,
-          ui: makeInitialUI(fresh),
-        }));
+        // Empezar de cero: sin lápidas de lo que había.
+        withoutStamps(() =>
+          set(() => ({
+            state: fresh,
+            ui: makeInitialUI(fresh),
+          }))
+        );
       },
 
       navigate: (screen, opts) =>
@@ -912,7 +967,7 @@ export const useStore = create<Store>()(
 
       resetNavigationToHome: () =>
         set((s) => ({ ui: makeInitialUI(s.state) })),
-    }),
+    })),
     {
       name: 'miercoles-app-state',
       version: SCHEMA_VERSION,
