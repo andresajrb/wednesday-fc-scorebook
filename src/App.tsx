@@ -4,6 +4,7 @@ import { getOpenJornada } from '@/store/selectors';
 import { activeScope } from '@/store/scope';
 import { UpdatePrompt } from '@/components/UpdatePrompt';
 import { WriteErrorBanner } from '@/components/WriteErrorBanner';
+import { JoinSheet } from '@/components/domain/JoinSheet';
 import { requestPersistentStorage } from '@/lib/storage-health';
 import { useMatchAlarms } from '@/lib/useMatchAlarms';
 import { OnboardingScreen } from '@/screens/OnboardingScreen';
@@ -64,6 +65,7 @@ export default function App() {
     <>
       <WriteErrorBanner />
       {renderScreen(screen)}
+      <JoinSheet />
       <UpdatePrompt />
     </>
   );

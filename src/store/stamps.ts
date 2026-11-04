@@ -72,3 +72,24 @@ export function recordCompetition(state: AppState, table: SyncTable, id: ID): ID
     }
   }
 }
+
+/** Competiciones cuyos registros cambian entre dos estados. */
+export function touchedCompetitions(prev: AppState, next: AppState): Set<ID> {
+  const out = new Set<ID>();
+  for (const table of SYNC_TABLES) {
+    const before = prev[table] as Record<ID, unknown>;
+    const after = next[table] as Record<ID, unknown>;
+    if (before === after) continue;
+    for (const [id, record] of Object.entries(after)) {
+      if (before[id] === record) continue;
+      const cid = recordCompetition(next, table, id);
+      if (cid) out.add(cid);
+    }
+    for (const id of Object.keys(before)) {
+      if (after[id]) continue;
+      const cid = recordCompetition(prev, table, id);
+      if (cid) out.add(cid);
+    }
+  }
+  return out;
+}

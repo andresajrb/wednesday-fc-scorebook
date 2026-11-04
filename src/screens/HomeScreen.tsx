@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Settings, Play, ArrowRight, Trophy, ChevronRight, Plus, Download, Table2 } from 'lucide-react';
+import { Settings, Play, ArrowRight, Trophy, ChevronRight, Plus, Download, Table2, Eye } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { Button } from '@/components/primitives/Button';
 import { IconButton } from '@/components/primitives/IconButton';
@@ -9,6 +9,7 @@ import { TeamFormSheet } from '@/components/domain/TeamFormSheet';
 import { CompetitionSwitcher } from '@/components/domain/CompetitionSwitcher';
 import { ImportTeamsSheet } from '@/components/domain/ImportTeamsSheet';
 import { CloudBanner } from '@/components/domain/CloudBanner';
+import { useCloudRole } from '@/sync/useCloud';
 import { useStore } from '@/store/useStore';
 import { useScopedState } from '@/store/useScopedState';
 import {
@@ -32,6 +33,8 @@ export function HomeScreen() {
   const competitionCount = useStore((s) => Object.keys(s.state.competitions).length);
   const importTeams = useStore((s) => s.importTeams);
   const closed = getClosedJornadasDesc(state).slice(0, 5);
+  // Espectador: ve todo, pero no crea ni cambia nada (el store igual lo bloquea).
+  const viewer = useCloudRole(state.activeCompetitionId) === 'viewer';
 
   const onStartOrContinue = () => {
     if (open) {
@@ -52,6 +55,21 @@ export function HomeScreen() {
       </header>
 
       <div className="px-4 py-4 space-y-6 flex-1">
+        {viewer && (
+          <div
+            data-viewer-notice
+            className="flex items-start gap-3 rounded-card p-4 border border-border bg-bg-elev"
+          >
+            <Eye size={18} className="text-accent mt-0.5 flex-shrink-0" strokeWidth={1.75} />
+            <div>
+              <div className="text-body-em font-semibold">Modo espectador</div>
+              <div className="text-caption text-text-2 mt-1 leading-relaxed">
+                Ves la tabla y las jornadas al día. Solo el organizador y los admins anotan.
+              </div>
+            </div>
+          </div>
+        )}
+
         {open ? (
           <button
             type="button"
@@ -71,11 +89,11 @@ export function HomeScreen() {
             </div>
             <div className="mt-4">
               <Button size="lg" fullWidth trailing={<ArrowRight size={18} strokeWidth={1.75} />}>
-                Continuar
+                {viewer ? 'Ver jornada' : 'Continuar'}
               </Button>
             </div>
           </button>
-        ) : (
+        ) : viewer ? null : (
           <div className="rounded-card p-4 border border-border bg-bg-elev">
             <div className="text-title font-bold tracking-tight">¿Listo para jugar?</div>
             <div className="text-caption text-text-2 mt-1">Inicia una nueva jornada para hoy.</div>
@@ -126,16 +144,16 @@ export function HomeScreen() {
                 onClick={() => navigate({ name: 'team-detail', teamId: t.id })}
               />
             ))}
-            <button
+            {!viewer && <button
               type="button"
               onClick={() => setCreatingTeam(true)}
               className="aspect-[1.05/1] flex flex-col items-center justify-center gap-2 p-3.5 rounded-card border border-dashed border-border-strong text-text-2 active:scale-[0.98] transition-transform"
             >
               <Plus size={22} strokeWidth={1.75} />
               <span className="text-body-em font-medium">Nuevo equipo</span>
-            </button>
+            </button>}
           </div>
-          {competitionCount > 1 && (
+          {competitionCount > 1 && !viewer && (
             <button
               type="button"
               onClick={() => setImportingTeams(true)}

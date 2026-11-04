@@ -5,6 +5,7 @@ import type {
   AppState,
   Competition,
   ID,
+  SyncTable,
   Match,
   MatchRosterEntry,
   Screen,
@@ -37,7 +38,8 @@ import {
 import { clearSnapshots, looksLikeDataLoss, rotateSnapshot, writeBootSnapshot } from './snapshots';
 import { migrateAppState } from './migrations';
 import { activeScope, playerCompetition } from './scope';
-import { stampChanges } from './stamps';
+import { stampChanges, touchedCompetitions } from './stamps';
+import type { RecordRow } from '@/sync/rows';
 import { todayISODate } from '@/lib/format';
 
 const newId = (): ID =>
@@ -129,6 +131,10 @@ interface StoreActions {
 
   // Edit
   reopenMatch(matchId: ID): void;
+
+  // Nube
+  /** Aplica registros bajados de la nube. Devuelve los que quedaron (o ya estaban) así. */
+  applyRemote(rows: RecordRow[]): RecordRow[];
 
   // Backup / reset
   replaceState(next: AppState): void;
@@ -288,6 +294,17 @@ function matchCompetition(state: AppState, matchId: ID): ID | null {
 /** Mientras está activo, `set` guarda el estado tal cual, sin marcar cambios. */
 let stampsPaused = false;
 
+/** Competiciones en las que este teléfono es espectador: sus datos no se tocan. */
+let readOnlyCompetitions: ReadonlySet<ID> = new Set();
+
+export function setReadOnlyCompetitions(ids: Iterable<ID>): void {
+  readOnlyCompetitions = new Set(ids);
+}
+
+export function isReadOnlyCompetition(id: ID | null): boolean {
+  return id !== null && readOnlyCompetitions.has(id);
+}
+
 function withoutStamps(fn: () => void): void {
   stampsPaused = true;
   try {
@@ -310,6 +327,11 @@ function withStamps(
       set((s) => {
         const p = typeof partial === 'function' ? partial(s) : partial;
         if (!p.state || p.state === s.state) return p;
+        if (readOnlyCompetitions.size > 0) {
+          for (const cid of touchedCompetitions(s.state, p.state)) {
+            if (readOnlyCompetitions.has(cid)) return { ...p, state: s.state };
+          }
+        }
         return { ...p, state: stampChanges(s.state, p.state, nowISO()) };
       });
     }) as typeof set;
@@ -898,6 +920,52 @@ export const useStore = create<Store>()(
             },
           };
         }),
+
+      applyRemote: (rows) => {
+        const applied: RecordRow[] = [];
+        withoutStamps(() =>
+          set((s) => {
+            const st = s.state;
+            const tables: Partial<Record<SyncTable, Record<ID, { updatedAt: string }>>> = {};
+            let tombstones: AppState['tombstones'] | null = null;
+            for (const row of rows) {
+              const table = row.table_name;
+              const version = new Date(row.updated_at).toISOString();
+              const current = (tables[table] ?? st[table]) as Record<ID, { updatedAt: string }>;
+              const local = current[row.id];
+              const tomb = (tombstones ?? st.tombstones)[row.id];
+              const localVersion = local?.updatedAt ?? tomb?.deletedAt;
+              // Lo de este teléfono es más nuevo: gana y se sube en la próxima pasada.
+              if (localVersion && localVersion > version) continue;
+              const normalized = { ...row, updated_at: version };
+              applied.push(normalized);
+              if (localVersion === version && Boolean(row.deleted_at) === !local) continue;
+              const records = (tables[table] ??= { ...st[table] } as Record<ID, { updatedAt: string }>);
+              tombstones ??= { ...st.tombstones };
+              if (row.deleted_at) {
+                delete records[row.id];
+                tombstones[row.id] = {
+                  table,
+                  competitionId: row.competition_id,
+                  deletedAt: version,
+                };
+              } else {
+                records[row.id] = { ...(row.data as object), updatedAt: version };
+                delete tombstones[row.id];
+              }
+            }
+            if (!tombstones) return s;
+            const next = { ...st, ...tables, tombstones } as AppState;
+            // Si lo que se estaba mirando desapareció, se vuelve al inicio; si no, la
+            // navegación queda como estaba.
+            const checked = sanitizeUI(s.ui, next);
+            const same =
+              JSON.stringify(checked.currentScreen) === JSON.stringify(s.ui.currentScreen);
+            return { state: next, ui: same ? s.ui : checked };
+          })
+        );
+        return applied;
+      },
 
       replaceState: (next) => {
         // Guardamos lo que había ANTES de pisarlo: importar un respaldo

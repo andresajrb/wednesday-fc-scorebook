@@ -14,6 +14,7 @@ import { JornadaTeamsSheet } from '@/components/domain/JornadaTeamsSheet';
 import { LiveStandings } from '@/components/domain/LiveStandings';
 import { useStore } from '@/store/useStore';
 import { useScopedState } from '@/store/useScopedState';
+import { useCloudRole } from '@/sync/useCloud';
 import {
   getMatchesForJornada,
   getMatchScore,
@@ -35,6 +36,8 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
   const back = useStore((s) => s.back);
   const navigate = useStore((s) => s.navigate);
   const state = useScopedState();
+  // El espectador ve la jornada como si estuviera cerrada: sin botones para anotar.
+  const viewer = useCloudRole(state.activeCompetitionId) === 'viewer';
   const startMatch = useStore((s) => s.startMatch);
   const closeJornada = useStore((s) => s.closeJornada);
   const cancelMatch = useStore((s) => s.cancelMatch);
@@ -154,7 +157,7 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
           </div>
         }
         right={
-          !closed && (
+          !closed && !viewer && (
             <button
               type="button"
               onClick={onClose}
@@ -234,20 +237,22 @@ export function JornadaActivaScreen({ jornadaId }: JornadaActivaScreenProps) {
                 goalsB={goalsB}
                 scorersText={scorers.join(', ')}
                 onClick={
-                  m.result === null
+                  m.result === null && !viewer
                     ? () => navigate({ name: 'match-record', matchId: m.id })
-                    : !closed
+                    : !closed && !viewer
                       ? () => setMatchMenuId(m.id)
                       : undefined
                 }
-                onMore={!closed && m.result !== null ? () => setMatchMenuId(m.id) : undefined}
+                onMore={
+                  !closed && !viewer && m.result !== null ? () => setMatchMenuId(m.id) : undefined
+                }
               />
             );
           })
         )}
       </div>
 
-      {!closed && (
+      {!closed && !viewer && (
         <StickyBottomCTA>
           <Button
             size="xl"

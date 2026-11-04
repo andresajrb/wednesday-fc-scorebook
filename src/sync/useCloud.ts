@@ -1,24 +1,43 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { ID } from '@/types/domain';
-import { useStore } from '@/store/useStore';
+import { setReadOnlyCompetitions, useStore } from '@/store/useStore';
 import { rawStorage } from '@/store/persistence';
 import { cloudEnabled, supabase } from './client';
-import { pendingRows, type PushedVersions } from './rows';
+import { pendingRows, type PushedVersions, type RecordRow } from './rows';
 
-/** Competición subida a la nube desde este teléfono. */
+export type CloudRole = 'organizer' | 'scorer' | 'viewer';
+
+export const ROLE_LABEL: Record<CloudRole, string> = {
+  organizer: 'Organizador',
+  scorer: 'Admin',
+  viewer: 'Espectador',
+};
+
+/** Competición de este teléfono que está en la nube. */
 export interface CloudLink {
   linkedAt: string;
+  role: CloudRole;
   lastPushAt: string | null;
+  /** Reloj del servidor del último registro bajado; null = falta la primera bajada. */
+  pulledUpTo: string | null;
+}
+
+export interface CloudMember {
+  userId: ID;
+  role: CloudRole;
+  displayName: string | null;
 }
 
 /** Va en IndexedDB y no en localStorage: tiene una entrada por registro. */
 const PUSHED_KEY = 'miercoles-cloud-pushed';
 
-export type CloudStatus = 'idle' | 'pushing' | 'error';
+export type CloudStatus = 'idle' | 'syncing' | 'error';
 
 interface CloudData {
   /** null = sin sesión. */
+  userId: ID | null;
+  /** Solo el organizador entra con email; los invitados tienen sesión anónima. */
   email: string | null;
   links: Record<ID, CloudLink>;
   status: CloudStatus;
@@ -28,6 +47,10 @@ interface CloudData {
   bannerDismissed: boolean;
   /** Mientras la nube está en prueba, solo se ve en el teléfono que la desbloqueó. */
   unlocked: boolean;
+  /** Link de invitación abierto que falta aceptar. */
+  pendingInvite: string | null;
+  /** Link de espectadores de cada competición, para volver a compartirlo. */
+  viewerLinks: Record<ID, string>;
   /** Por competición, la versión de cada registro que ya está en la nube. */
   pushed: Record<ID, PushedVersions>;
   /** Falso hasta leer `pushed` del disco: antes no se sabe qué falta subir. */
@@ -38,14 +61,25 @@ interface CloudActions {
   sendMagicLink(email: string): Promise<void>;
   signOut(): Promise<void>;
   uploadCompetition(competitionId: ID): Promise<void>;
+  joinWithInvite(name: string): Promise<void>;
+  cancelInvite(): void;
+  inviteLink(competitionId: ID, role: 'scorer' | 'viewer'): Promise<string>;
+  disableViewerLink(competitionId: ID): Promise<void>;
+  fetchMembers(competitionId: ID): Promise<CloudMember[]>;
+  removeMember(competitionId: ID, userId: ID): Promise<void>;
   dismissBanner(): void;
   clearError(): void;
   toggleUnlocked(): void;
 }
 
 const UPSERT_CHUNK = 500;
-const PUSH_DEBOUNCE_MS = 2000;
+const PULL_PAGE = 1000;
+/** Se vuelve a pedir el último minuto: un registro puede confirmarse con algo de demora. */
+const PULL_OVERLAP_MS = 60_000;
+const SYNC_DEBOUNCE_MS = 2000;
 const RETRY_MS = 30_000;
+const POLL_MS = 30_000;
+const INVITE_PARAM = 'unirse';
 
 /**
  * Estado de la nube en este teléfono. Va aparte de los datos (no viaja en los respaldos)
@@ -54,6 +88,7 @@ const RETRY_MS = 30_000;
 export const useCloud = create<CloudData & CloudActions>()(
   persist(
     (set, get) => ({
+      userId: null,
       email: null,
       links: {},
       status: 'idle',
@@ -61,15 +96,20 @@ export const useCloud = create<CloudData & CloudActions>()(
       linkSentTo: null,
       bannerDismissed: false,
       unlocked: false,
+      pendingInvite: null,
+      viewerLinks: {},
       pushed: {},
       pushedLoaded: false,
 
       sendMagicLink: async (email) => {
         if (!supabase) return;
-        const { error } = await supabase.auth.signInWithOtp({
-          email,
-          options: { emailRedirectTo: window.location.origin + window.location.pathname },
-        });
+        const redirectTo = window.location.origin + window.location.pathname;
+        // Un invitado (sesión anónima) que agrega su email conserva sus grupos: se le
+        // asigna el email a su misma cuenta en vez de crear otra.
+        const user = (await supabase.auth.getUser()).data.user;
+        const { error } = user?.is_anonymous
+          ? await supabase.auth.updateUser({ email }, { emailRedirectTo: redirectTo })
+          : await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
         if (error) throw new Error(authErrorMessage(error.message));
         set({ linkSentTo: email, error: null });
       },
@@ -77,7 +117,7 @@ export const useCloud = create<CloudData & CloudActions>()(
       signOut: async () => {
         if (!supabase) return;
         await supabase.auth.signOut();
-        set({ email: null, linkSentTo: null });
+        set({ userId: null, email: null, linkSentTo: null });
       },
 
       uploadCompetition: async (competitionId) => {
@@ -85,20 +125,106 @@ export const useCloud = create<CloudData & CloudActions>()(
         const { error } = await supabase.rpc('create_group', { cid: competitionId });
         if (error) {
           console.error('[nube] create_group', error);
-          set({ status: 'error', error: pushErrorMessage(error.message) });
+          set({ status: 'error', error: syncErrorMessage(error.message) });
           return;
         }
-        set((s) => ({
-          links: {
-            ...s.links,
-            [competitionId]: s.links[competitionId] ?? {
-              linkedAt: new Date().toISOString(),
-              lastPushAt: null,
-            },
-          },
-          bannerDismissed: true,
+        linkCompetition(competitionId, 'organizer');
+        set({ bannerDismissed: true });
+        await syncNow();
+      },
+
+      joinWithInvite: async (name) => {
+        const token = get().pendingInvite;
+        if (!supabase || !token) return;
+        const session = (await supabase.auth.getSession()).data.session;
+        if (!session) {
+          const { data, error } = await supabase.auth.signInAnonymously();
+          if (error || !data.user) {
+            console.error('[nube] signInAnonymously', error);
+            throw new Error('No se pudo entrar. Revisa tu conexión e inténtalo de nuevo.');
+          }
+          set({ userId: data.user.id, email: null });
+        }
+        const { data, error } = await supabase.rpc('redeem_invite', { token, name });
+        const joined = (data as Array<{ competition_id: ID; role: CloudRole }> | null)?.[0];
+        if (error || !joined) {
+          console.error('[nube] redeem_invite', error);
+          if (error && /no es válido|venció/.test(error.message)) {
+            throw new InvalidInviteError('El link no es válido o ya venció. Pide uno nuevo a quien te invitó.');
+          }
+          throw new Error('No se pudo entrar. Revisa tu conexión e inténtalo de nuevo.');
+        }
+        linkCompetition(joined.competition_id, joined.role);
+        set({ pendingInvite: null, bannerDismissed: true });
+        await pullCompetition(joined.competition_id);
+        useStore.getState().setActiveCompetition(joined.competition_id);
+      },
+
+      cancelInvite: () => set({ pendingInvite: null }),
+
+      inviteLink: async (competitionId, role) => {
+        if (!supabase) throw new Error('La nube no está disponible.');
+        const saved = get().viewerLinks[competitionId];
+        if (role === 'viewer' && saved) return saved;
+        const { data, error } = await supabase.rpc('create_invite', {
+          cid: competitionId,
+          invite_role: role,
+        });
+        if (error || typeof data !== 'string') {
+          console.error('[nube] create_invite', error);
+          throw new Error('No se pudo crear el link. Revisa tu conexión.');
+        }
+        const url = `${window.location.origin}/?${INVITE_PARAM}=${data}`;
+        if (role === 'viewer') {
+          set((s) => ({ viewerLinks: { ...s.viewerLinks, [competitionId]: url } }));
+        }
+        return url;
+      },
+
+      disableViewerLink: async (competitionId) => {
+        if (!supabase) return;
+        const { data, error } = await supabase
+          .from('invites')
+          .select('id')
+          .eq('competition_id', competitionId)
+          .eq('role', 'viewer')
+          .is('revoked_at', null);
+        if (error) throw new Error('No se pudo desactivar el link. Revisa tu conexión.');
+        for (const invite of data ?? []) {
+          const { error: revokeError } = await supabase.rpc('revoke_invite', {
+            invite_id: invite.id,
+          });
+          if (revokeError) throw new Error('No se pudo desactivar el link. Revisa tu conexión.');
+        }
+        set((s) => {
+          const viewerLinks = { ...s.viewerLinks };
+          delete viewerLinks[competitionId];
+          return { viewerLinks };
+        });
+      },
+
+      fetchMembers: async (competitionId) => {
+        if (!supabase) return [];
+        const { data, error } = await supabase
+          .from('members')
+          .select('user_id, role, display_name, created_at')
+          .eq('competition_id', competitionId)
+          .order('created_at');
+        if (error) throw new Error('No se pudo cargar la lista. Revisa tu conexión.');
+        return (data ?? []).map((m) => ({
+          userId: m.user_id as ID,
+          role: m.role as CloudRole,
+          displayName: (m.display_name as string | null) ?? null,
         }));
-        await pushPending();
+      },
+
+      removeMember: async (competitionId, userId) => {
+        if (!supabase) return;
+        const { error } = await supabase.rpc('remove_member', {
+          cid: competitionId,
+          member_id: userId,
+        });
+        if (error) throw new Error('No se pudo sacar. Revisa tu conexión.');
       },
 
       dismissBanner: () => set({ bannerDismissed: true }),
@@ -113,20 +239,44 @@ export const useCloud = create<CloudData & CloudActions>()(
         linkSentTo: s.linkSentTo,
         bannerDismissed: s.bannerDismissed,
         unlocked: s.unlocked,
+        pendingInvite: s.pendingInvite,
+        viewerLinks: s.viewerLinks,
       }),
+      // Los links de antes de las invitaciones eran todos del organizador.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<CloudData>;
+        const links: Record<ID, CloudLink> = {};
+        for (const [id, link] of Object.entries(p.links ?? {})) {
+          links[id] = { ...link, role: link.role ?? 'organizer', pulledUpTo: link.pulledUpTo ?? null };
+        }
+        return { ...current, ...p, links };
+      },
     }
   )
 );
 
 /**
  * La nube se muestra si este build la trae y el teléfono la desbloqueó (o ya la usa: tiene
- * sesión o competiciones en la nube).
+ * sesión, competiciones en la nube o un link de invitación abierto).
  */
 export function useCloudVisible(): boolean {
   return useCloud(
-    (s) => cloudEnabled && (s.unlocked || s.email !== null || Object.keys(s.links).length > 0)
+    (s) =>
+      cloudEnabled &&
+      (s.unlocked ||
+        s.email !== null ||
+        s.pendingInvite !== null ||
+        Object.keys(s.links).length > 0)
   );
 }
+
+/** Rol de este teléfono en una competición, o null si no está en la nube. */
+export function useCloudRole(competitionId: ID | null): CloudRole | null {
+  return useCloud((s) => (competitionId ? (s.links[competitionId]?.role ?? null) : null));
+}
+
+/** El link no sirve (inventado, vencido, usado o desactivado): reintentar no cambia nada. */
+export class InvalidInviteError extends Error {}
 
 function authErrorMessage(message: string): string {
   if (/rate limit|security purposes/i.test(message)) {
@@ -136,99 +286,186 @@ function authErrorMessage(message: string): string {
   return message;
 }
 
-function pushErrorMessage(message: string): string {
+function syncErrorMessage(message: string): string {
   if (/fetch|network|load failed/i.test(message)) {
     return 'No hay conexión con la nube. Se reintenta solo.';
   }
   if (/otro organizador/.test(message)) return message;
   if (/row-level security|permission|JWT/i.test(message)) {
-    return 'La nube no aceptó los cambios: vuelve a entrar con tu email.';
+    return 'La nube no aceptó los cambios: vuelve a entrar.';
   }
-  return 'No se pudo subir a la nube. Se reintenta solo en unos segundos.';
+  return 'No se pudo sincronizar con la nube. Se reintenta solo en unos segundos.';
 }
 
-let pushing: Promise<void> | null = null;
-let pushAgain = false;
+function linkCompetition(competitionId: ID, role: CloudRole): void {
+  useCloud.setState((s) => {
+    const current = s.links[competitionId];
+    if (current?.role === role) return s;
+    return {
+      links: {
+        ...s.links,
+        [competitionId]: current
+          ? { ...current, role }
+          : { linkedAt: new Date().toISOString(), role, lastPushAt: null, pulledUpTo: null },
+      },
+    };
+  });
+}
+
+/** Los datos solo se tocan con la hidratación terminada y sana: si no, no son los reales. */
+function storeReady(): boolean {
+  const store = useStore.getState();
+  return store.hydrationSettled && !store.hydrateError;
+}
+
+let syncing: Promise<void> | null = null;
+let syncAgain = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
-function schedulePush(delay = PUSH_DEBOUNCE_MS): void {
+function scheduleSync(delay = SYNC_DEBOUNCE_MS): void {
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
     timer = null;
-    void pushPending();
+    void syncNow();
   }, delay);
 }
 
-/** Sube lo pendiente de cada competición enlazada. Si ya hay una subida en curso, se encola. */
-export async function pushPending(): Promise<void> {
-  if (pushing) {
-    pushAgain = true;
-    return pushing;
+/** Sube lo pendiente y baja lo nuevo. Si ya hay una pasada en curso, se encola otra. */
+export async function syncNow(): Promise<void> {
+  if (syncing) {
+    syncAgain = true;
+    return syncing;
   }
-  pushing = (async () => {
+  syncing = (async () => {
     try {
       do {
-        pushAgain = false;
-        await pushOnce();
-      } while (pushAgain);
+        syncAgain = false;
+        await syncOnce();
+      } while (syncAgain);
     } finally {
-      pushing = null;
+      syncing = null;
     }
   })();
-  return pushing;
+  return syncing;
 }
 
-async function pushOnce(): Promise<void> {
+async function syncOnce(): Promise<void> {
   const cloud = useCloud.getState();
-  if (!supabase || !cloud.email || !cloud.pushedLoaded) return;
-  const store = useStore.getState();
-  // Con la hidratación fallida, el estado en memoria no es el real: no se sube nada.
-  if (!store.hydrationSettled || store.hydrateError) return;
-
-  for (const competitionId of Object.keys(cloud.links)) {
-    const pushed = useCloud.getState().pushed[competitionId] ?? {};
-    const rows = pendingRows(useStore.getState().state, competitionId, pushed);
-    if (rows.length === 0) continue;
-    if (!navigator.onLine) {
-      useCloud.setState({ status: 'idle' });
-      return;
+  if (!supabase || !cloud.userId || !cloud.pushedLoaded || !storeReady()) return;
+  if (!navigator.onLine) return;
+  try {
+    await discoverMemberships();
+    for (const competitionId of Object.keys(useCloud.getState().links)) {
+      await pushCompetition(competitionId);
+      await pullCompetition(competitionId);
     }
-    useCloud.setState({ status: 'pushing' });
-    for (let i = 0; i < rows.length; i += UPSERT_CHUNK) {
-      const { error } = await supabase
-        .from('records')
-        .upsert(rows.slice(i, i + UPSERT_CHUNK), { onConflict: 'competition_id,table_name,id' });
-      if (error) {
-        console.error('[nube] subida', error);
-        useCloud.setState({ status: 'error', error: pushErrorMessage(error.message) });
-        schedulePush(RETRY_MS);
-        return;
-      }
-    }
-    const versions = { ...pushed };
-    for (const row of rows) versions[row.id] = row.updated_at;
-    useCloud.setState((s) => {
-      const current = s.links[competitionId];
-      if (!current) return s;
-      return {
-        links: { ...s.links, [competitionId]: { ...current, lastPushAt: new Date().toISOString() } },
-        pushed: { ...s.pushed, [competitionId]: versions },
-      };
-    });
-    await rawStorage.set(PUSHED_KEY, useCloud.getState().pushed);
+    useCloud.setState({ status: 'idle', error: null });
+  } catch (err) {
+    console.error('[nube] sincronización', err);
+    const message = err instanceof Error ? err.message : String(err);
+    useCloud.setState({ status: 'error', error: syncErrorMessage(message) });
+    scheduleSync(RETRY_MS);
   }
-  useCloud.setState({ status: 'idle', error: null });
+}
+
+/**
+ * Los grupos de los que este usuario es miembro mandan: así el organizador recupera los
+ * suyos en un teléfono nuevo, y a quien sacaron de un grupo deja de sincronizarlo.
+ */
+async function discoverMemberships(): Promise<void> {
+  if (!supabase) return;
+  const userId = useCloud.getState().userId;
+  const { data, error } = await supabase
+    .from('members')
+    .select('competition_id, role')
+    .eq('user_id', userId);
+  if (error) throw new Error(error.message);
+  const roles = new Map((data ?? []).map((m) => [m.competition_id as ID, m.role as CloudRole]));
+  for (const [competitionId, role] of roles) linkCompetition(competitionId, role);
+  useCloud.setState((s) => {
+    const stale = Object.keys(s.links).filter((id) => !roles.has(id));
+    if (stale.length === 0) return s;
+    const links = { ...s.links };
+    for (const id of stale) delete links[id];
+    return { links };
+  });
+}
+
+async function pushCompetition(competitionId: ID): Promise<void> {
+  if (!supabase) return;
+  const link = useCloud.getState().links[competitionId];
+  if (!link || link.role === 'viewer') return;
+  const pushed = useCloud.getState().pushed[competitionId] ?? {};
+  const rows = pendingRows(useStore.getState().state, competitionId, pushed);
+  if (rows.length === 0) return;
+  useCloud.setState({ status: 'syncing' });
+  for (let i = 0; i < rows.length; i += UPSERT_CHUNK) {
+    const { error } = await supabase
+      .from('records')
+      .upsert(rows.slice(i, i + UPSERT_CHUNK), { onConflict: 'competition_id,table_name,id' });
+    if (error) throw new Error(error.message);
+  }
+  await markPushed(competitionId, rows, { lastPushAt: new Date().toISOString() });
+}
+
+async function pullCompetition(competitionId: ID): Promise<void> {
+  if (!supabase || !storeReady()) return;
+  const link = useCloud.getState().links[competitionId];
+  if (!link) return;
+  const since = link.pulledUpTo
+    ? new Date(Date.parse(link.pulledUpTo) - PULL_OVERLAP_MS).toISOString()
+    : null;
+  const rows: Array<RecordRow & { synced_at: string }> = [];
+  for (let from = 0; ; from += PULL_PAGE) {
+    let query = supabase
+      .from('records')
+      .select('table_name, id, competition_id, data, updated_at, deleted_at, synced_at')
+      .eq('competition_id', competitionId)
+      .order('synced_at')
+      .range(from, from + PULL_PAGE - 1);
+    if (since) query = query.gt('synced_at', since);
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    rows.push(...((data ?? []) as Array<RecordRow & { synced_at: string }>));
+    if (!data || data.length < PULL_PAGE) break;
+  }
+  if (rows.length === 0) return;
+  const applied = useStore.getState().applyRemote(rows);
+  const pulledUpTo = rows.reduce((max, r) => (r.synced_at > max ? r.synced_at : max), '');
+  await markPushed(competitionId, applied, { pulledUpTo });
+}
+
+/** Lo que coincide con la nube no hace falta subirlo. */
+async function markPushed(
+  competitionId: ID,
+  rows: RecordRow[],
+  linkPatch: Partial<CloudLink>
+): Promise<void> {
+  useCloud.setState((s) => {
+    const current = s.links[competitionId];
+    if (!current) return s;
+    const versions = { ...(s.pushed[competitionId] ?? {}) };
+    for (const row of rows) versions[row.id] = row.updated_at;
+    return {
+      links: { ...s.links, [competitionId]: { ...current, ...linkPatch } },
+      pushed: { ...s.pushed, [competitionId]: versions },
+    };
+  });
+  await rawStorage.set(PUSHED_KEY, useCloud.getState().pushed);
 }
 
 let started = false;
 
-/** Se llama una vez al arrancar: sesión, subida tras cada cambio y al recuperar la señal. */
+/** Se llama una vez al arrancar: sesión, sincronización tras cada cambio y al volver la señal. */
 export function startCloudSync(): void {
   if (started || !supabase) return;
   started = true;
 
-  // El link del email vuelve con `?code=` (o con el error, si venció): se limpia la URL.
   const params = new URLSearchParams(window.location.search);
+  // Link de invitación: se guarda para aceptarlo (pidiendo el nombre) y se limpia la URL.
+  const invite = params.get(INVITE_PARAM);
+  if (invite) useCloud.setState({ pendingInvite: invite });
+  // El link del email vuelve con `?code=` (o con el error, si venció).
   const linkError = params.get('error_description');
   if (linkError) {
     useCloud.setState({
@@ -237,7 +474,7 @@ export function startCloudSync(): void {
         : linkError,
     });
   }
-  if (params.has('code') || params.has('error')) {
+  if (invite || params.has('code') || params.has('error')) {
     window.history.replaceState(null, '', window.location.pathname);
   }
 
@@ -246,18 +483,40 @@ export function startCloudSync(): void {
     .catch(() => null)
     .then((pushed) => {
       useCloud.setState({ pushed: pushed ?? {}, pushedLoaded: true });
-      schedulePush(0);
+      scheduleSync(0);
     });
 
   supabase.auth.onAuthStateChange((_event, session) => {
-    const email = session?.user.email ?? null;
-    useCloud.setState(email ? { email, linkSentTo: null } : { email: null });
-    if (email) schedulePush(0);
+    const user = session?.user ?? null;
+    useCloud.setState(
+      user
+        ? { userId: user.id, email: user.is_anonymous ? null : (user.email ?? null) }
+        : { userId: null, email: null }
+    );
+    if (user?.email) useCloud.setState({ linkSentTo: null });
+    if (user) scheduleSync(0);
+  });
+
+  const applyReadOnly = (links: Record<ID, CloudLink>) =>
+    setReadOnlyCompetitions(
+      Object.entries(links)
+        .filter(([, link]) => link.role === 'viewer')
+        .map(([id]) => id)
+    );
+  applyReadOnly(useCloud.getState().links);
+  useCloud.subscribe((s, prev) => {
+    if (s.links !== prev.links) applyReadOnly(s.links);
   });
 
   useStore.subscribe((s, prev) => {
-    if (s.state !== prev.state) schedulePush();
-    if (s.hydrationSettled && !prev.hydrationSettled) schedulePush(0);
+    if (s.state !== prev.state) scheduleSync();
+    if (s.hydrationSettled && !prev.hydrationSettled) scheduleSync(0);
   });
-  window.addEventListener('online', () => schedulePush(0));
+  window.addEventListener('online', () => scheduleSync(0));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') scheduleSync(0);
+  });
+  setInterval(() => {
+    if (document.visibilityState === 'visible') scheduleSync(0);
+  }, POLL_MS);
 }
