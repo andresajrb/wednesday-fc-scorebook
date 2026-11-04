@@ -133,17 +133,48 @@ Decidido:
 Objetivo: que quede bien y bajo nuestro control (datos, infraestructura y costos).
 
 ### [~] Sincronización entre dispositivos
-Decisiones a tomar:
-- **Proveedor / control**: Supabase (gestionado o self-hosted) vs. API propia (p. ej. Postgres + Hono/Node,
-  o Cloudflare Workers + D1). Criterio: poder llevarse los datos y el código a otro hosting sin reescribir.
-- **Identidad sin fricción**: código o link de grupo; magic link por email solo para el organizador.
-  Roles: organizador (escribe), anotador invitado (escribe), espectador (lee).
-- **Modelo de sync**: offline-first. Cola local de cambios y envío al recuperar conexión.
-  Los goles son append-only (buen candidato a log de eventos); equipos/jugadores con last-write-wins por campo.
-- **Conflictos**: dos teléfonos anotando la misma partida. ¿Se permite o se bloquea la partida a un solo anotador?
-- **Seguridad**: Row Level Security o equivalente por grupo; rate limiting; nada de claves en el frontend.
-- **Respaldos del servidor** y export JSON siempre disponible (los datos son del usuario).
-- **Costos**: estimar con el free tier y con N grupos.
+Decidido:
+- **Alcance inicial**: respaldo en la nube / cambio de teléfono + uno anota y los demás miran en vivo.
+  **Próximamente**: varios anotadores, solo si el organizador lo habilita repartiendo links de invitación
+  con rol de anotador a quienes él elija.
+- **Proveedor: Supabase gestionado.** Es Postgres estándar (`pg_dump` para llevarse los datos);
+  usa Auth, RLS y Realtime.
+- **Identidad**: magic link por email solo para el organizador; el resto entra con link o código de grupo,
+  sin registrarse.
+- **Roles**: organizador (escribe y reparte links), anotador (escribe), espectador (lee).
+- **Conflictos**: **un anotador por partida**, con botón "tomar control". Sin mezclar cambios.
+- **Resolución**: last-write-wins **por registro** (`updatedAt`) + borrado lógico (`deletedAt`).
+- **Offline-first obligatorio**: la app funciona igual sin señal; cola local de cambios que se envía al
+  recuperar conexión.
+
+Estado del código:
+- A favor: listas planas por id con `competitionId` e IDs `crypto.randomUUID()` generados en el teléfono.
+- Los goles **no** son append-only: se reasignan y se borran.
+
+Fases:
+0. ✅ Migración v6→v7: todo registro tiene `updatedAt` y los borrados dejan una lápida en
+   `state.tombstones` (las listas solo tienen lo vigente; en el servidor será la columna `deleted_at`).
+   Lo marca `stampChanges` en un solo lugar, para todas las acciones. Importar un respaldo y
+   "Borrar todo" no generan lápidas.
+1. El organizador crea el grupo en la nube y sus datos suben ("Respalda tus datos en la nube").
+2. Otro teléfono entra con el link y los datos bajan.
+3. Realtime + un anotador por partida (seguir el partido en vivo).
+4. Dominio nuevo + página pública.
+
+Seguridad, respaldos y costos (decidido):
+- **Grupo en la nube = una competición**, con sus propios links y miembros (miércoles y sábados no se ven).
+- **Entrar sin registrarse**: sesión anónima de Supabase; el link de invitación da el rol.
+- **Links de invitación**: revocables, con vencimiento opcional, guardados como hash. El organizador
+  ve los miembros y puede sacar a cualquiera.
+- **RLS**: solo los miembros leen; solo organizador y anotador escriben. El "un anotador por partida"
+  también lo valida el servidor.
+- **Claves**: en el frontend solo la clave pública (anon); la `service_role` nunca sale del servidor.
+- **Abuso**: límites nativos de Supabase para sesiones anónimas; CAPTCHA (Turnstile) solo si aparece abuso.
+- **Respaldos**: `pg_dump` nocturno con GitHub Actions a un repo privado + la copia completa en cada
+  teléfono + export JSON siempre disponible.
+- **Costos**: free tier (500 MB, 50k MAU, 200 conexiones realtime). ~1 MB por grupo al año.
+  El Pro (US$25/mes) exige tarjeta internacional (difícil desde Venezuela): aguantar en el free tier.
+- **Pausa del free tier** (1 semana sin uso): el mismo job nocturno mantiene el proyecto activo.
 
 ### [~] Página pública de solo lectura del grupo
 - Link/QR: tabla, última jornada, goleadores. Sin instalar ni registrarse.
