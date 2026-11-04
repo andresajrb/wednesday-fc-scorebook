@@ -38,7 +38,7 @@ export function stampChanges(prev: AppState, next: AppState, now: string): AppSt
     for (const id of Object.keys(before)) {
       if (after[id]) continue;
       tombstones ??= { ...next.tombstones };
-      tombstones[id] = { table, deletedAt: now };
+      tombstones[id] = { table, competitionId: recordCompetition(prev, table, id), deletedAt: now };
     }
   }
 
@@ -47,4 +47,28 @@ export function stampChanges(prev: AppState, next: AppState, now: string): AppSt
     changed = true;
   }
   return changed ? out : next;
+}
+
+/** Competición de un registro, buscando por sus padres (en el estado de antes del borrado). */
+export function recordCompetition(state: AppState, table: SyncTable, id: ID): ID | null {
+  switch (table) {
+    case 'competitions':
+      return state.competitions[id] ? id : null;
+    case 'teams':
+      return state.teams[id]?.competitionId ?? null;
+    case 'jornadas':
+      return state.jornadas[id]?.competitionId ?? null;
+    case 'players': {
+      const teamId = state.players[id]?.teamId;
+      return teamId ? recordCompetition(state, 'teams', teamId) : null;
+    }
+    case 'matches': {
+      const jornadaId = state.matches[id]?.jornadaId;
+      return jornadaId ? recordCompetition(state, 'jornadas', jornadaId) : null;
+    }
+    case 'goals': {
+      const matchId = state.goals[id]?.matchId;
+      return matchId ? recordCompetition(state, 'matches', matchId) : null;
+    }
+  }
 }

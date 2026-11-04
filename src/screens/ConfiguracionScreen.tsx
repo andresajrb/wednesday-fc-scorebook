@@ -22,6 +22,7 @@ import { useStore } from '@/store/useStore';
 import { getSortedTeams } from '@/store/selectors';
 import { activeScope } from '@/store/scope';
 import { CompetitionsManager } from '@/components/domain/CompetitionsManager';
+import { CloudSection } from '@/components/domain/CloudSection';
 import { playTestAlert } from '@/lib/alerts';
 import { downloadBackup, downloadBackupFile, readBackupFile, BackupError } from '@/lib/backup';
 import { COLOR_SWATCHES } from '@/lib/colors';
@@ -63,6 +64,13 @@ export function ConfiguracionScreen() {
   const setTeamArchived = useStore((s) => s.setTeamArchived);
   const replaceState = useStore((s) => s.replaceState);
   const resetAll = useStore((s) => s.resetAll);
+  const openSection = useStore((s) =>
+    s.ui.currentScreen.name === 'settings' ? s.ui.currentScreen.section : undefined
+  );
+  useEffect(() => {
+    if (openSection !== 'cloud') return;
+    document.querySelector('[data-section="cloud"]')?.scrollIntoView({ block: 'start' });
+  }, [openSection]);
 
   const durationMinutes = Math.round(state.config.matchDurationSeconds / 60);
   const [durationInput, setDurationInput] = useState(String(durationMinutes));
@@ -344,6 +352,8 @@ export function ConfiguracionScreen() {
             </div>
           </div>
         </section>
+
+        <CloudSection />
 
         <section>
           <div className="text-caption uppercase tracking-wider text-text-2 font-semibold mb-2">

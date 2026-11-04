@@ -360,7 +360,7 @@ export function repairAppState(raw: string): { state: AppState; report: RepairRe
   const tombstones = records<Tombstone>(source.tombstones, (t) => {
     const table = SYNC_TABLES.find((name) => name === t.table);
     const deletedAt = str(t.deletedAt);
-    return table && deletedAt ? { table, deletedAt } : null;
+    return table && deletedAt ? { table, competitionId: str(t.competitionId), deletedAt } : null;
   });
   for (const id of Object.keys(tombstones)) {
     const table = tombstones[id].table;

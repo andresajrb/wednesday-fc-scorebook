@@ -12,6 +12,7 @@
   "dependencies": {
     "@fontsource-variable/geist": "^5.1.0",
     "@fontsource-variable/geist-mono": "^5.1.0",
+    "@supabase/supabase-js": "^2.119.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "localforage": "^1.10.0",

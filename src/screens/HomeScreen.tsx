@@ -8,6 +8,7 @@ import { TeamCard } from '@/components/domain/TeamCard';
 import { TeamFormSheet } from '@/components/domain/TeamFormSheet';
 import { CompetitionSwitcher } from '@/components/domain/CompetitionSwitcher';
 import { ImportTeamsSheet } from '@/components/domain/ImportTeamsSheet';
+import { CloudBanner } from '@/components/domain/CloudBanner';
 import { useStore } from '@/store/useStore';
 import { useScopedState } from '@/store/useScopedState';
 import {
@@ -105,6 +106,8 @@ export function HomeScreen() {
           </span>
           <ChevronRight size={18} className="text-text-3" strokeWidth={1.75} />
         </button>
+
+        <CloudBanner />
 
         <section>
           <div className="flex items-center justify-between mb-2">

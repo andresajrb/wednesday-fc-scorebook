@@ -133,6 +133,8 @@ export const SYNC_TABLES: readonly SyncTable[] = [
  */
 export interface Tombstone {
   table: SyncTable;
+  /** Competición a la que pertenecía: a qué grupo de la nube hay que avisarle. */
+  competitionId: ID | null;
   deletedAt: string;
 }
 
@@ -182,4 +184,4 @@ export type Screen =
   | { name: 'jornada-active'; jornadaId: ID }
   | { name: 'match-record'; matchId: ID }
   | { name: 'summary'; jornadaId: ID }
-  | { name: 'settings' };
+  | { name: 'settings'; section?: 'cloud' };
