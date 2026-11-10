@@ -163,7 +163,7 @@ Fases:
    sabe por la versión exacta de cada registro (no por fecha: la hora del teléfono puede fallar).
    Falta para producción: proyecto real de Supabase, variables en Vercel, URLs de redirección,
    SMTP propio (el de Supabase manda muy pocos correos por hora) y el `pg_dump` nocturno.
-2. Otro teléfono entra con el link y los datos bajan.
+2. ✅ Otro teléfono entra con el link y los datos bajan (probado en local y en producción).
    Dinámica de invitación (decidido):
    - Nadie más que el organizador usa email. El organizador lo da **una sola vez** (al subir su
      primera competición) para recuperar sus grupos en otro teléfono.
@@ -174,7 +174,8 @@ Fases:
    - **Admin = anotador**: abre jornadas, anota goles y edita equipos. Invitar y sacar miembros
      es solo del organizador.
    - Quien abre el link entra con sesión anónima, sin registrarse, con el rol del link.
-3. Realtime + un anotador por partida (seguir el partido en vivo).
+3. ✅ Realtime + un anotador por partida, con "Tomar control"; lo anotado sin señal por quien
+   perdió el control se descarta con aviso (probado en local y en producción).
 4. Dominio nuevo + página pública.
 
 Seguridad, respaldos y costos (decidido):
