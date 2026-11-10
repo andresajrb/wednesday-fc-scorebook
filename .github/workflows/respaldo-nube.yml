@@ -1,0 +1,71 @@
+# Respaldo nocturno de la nube (Supabase). De paso mantiene activo el proyecto gratis,
+# que se pausa tras una semana sin uso.
+#
+# El repo es público: cualquiera con cuenta de GitHub puede bajar los artifacts, así que el
+# respaldo se sube cifrado (AES256) con BACKUP_PASSPHRASE.
+#
+# Secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_DB_URL     Cadena "Session pooler" de Supabase (Connect), con la contraseña.
+#   BACKUP_PASSPHRASE   Contraseña del cifrado. Guárdala aparte: sin ella no se puede abrir.
+#
+# Es un respaldo de datos: el esquema está en supabase/migrations. Restaurar en un proyecto
+# con las migraciones aplicadas y las tablas vacías (replica: sin triggers, para que las
+# fechas queden tal cual):
+#   gpg --decrypt respaldo-AAAA-MM-DD.sql.gz.gpg | gunzip > respaldo.sql
+#   (echo "set session_replication_role = replica;"; cat respaldo.sql) | psql "<cadena>" -v ON_ERROR_STOP=1
+
+name: Respaldo de la nube
+
+on:
+  schedule:
+    - cron: '30 7 * * *' # 03:30 en Venezuela
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  respaldo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Volcar y cifrar
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SUPABASE_DB_URL" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "::error::Faltan los secrets SUPABASE_DB_URL o BACKUP_PASSPHRASE"
+            exit 1
+          fi
+          fecha=$(date -u +%F)
+          # Tablas de la app y los usuarios, para poder rearmar los grupos.
+          docker run --rm -e PGURL="$SUPABASE_DB_URL" postgres:17 \
+            sh -c "pg_dump \"\$PGURL\" --data-only --no-owner --no-privileges -t 'public.*' -t auth.users" \
+            | gzip -9 \
+            | gpg --batch --yes --symmetric --cipher-algo AES256 \
+                --passphrase-fd 3 3<<<"$BACKUP_PASSPHRASE" \
+                -o "respaldo-$fecha.sql.gz.gpg"
+          size=$(stat -c %s "respaldo-$fecha.sql.gz.gpg")
+          # Un volcado de ~0 bytes es un error que pasó en silencio.
+          if [ "$size" -lt 1024 ]; then
+            echo "::error::El respaldo pesa $size bytes: algo salió mal"
+            exit 1
+          fi
+          echo "Respaldo de $size bytes"
+
+      # El proyecto gratis se pausa si nadie usa la API en una semana.
+      - name: Mantener activo el proyecto
+        run: |
+          curl -fsS -o /dev/null -w "Auth: %{http_code}\n" \
+            "https://szvykvjpxxhlkkqnrpfj.supabase.co/auth/v1/health" \
+            -H "apikey: sb_publishable_y0UnL0RBams10ri1-zCRGQ_4cEngcKY"
+
+      - name: Guardar respaldo
+        uses: actions/upload-artifact@v4
+        with:
+          name: respaldo-nube
+          path: respaldo-*.sql.gz.gpg
+          retention-days: 30
+          if-no-files-found: error
