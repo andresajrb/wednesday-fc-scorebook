@@ -161,8 +161,9 @@ Fases:
    al volver la señal). Esquema en `supabase/migrations/`: tabla `records` (una fila por registro,
    con el registro en `data`), `members`, LWW en el servidor y `create_group`. Qué falta subir se
    sabe por la versión exacta de cada registro (no por fecha: la hora del teléfono puede fallar).
-   Falta para producción: proyecto real de Supabase, variables en Vercel, URLs de redirección,
-   SMTP propio (el de Supabase manda muy pocos correos por hora) y el `pg_dump` nocturno.
+   En producción (proyecto `szvykvjpxxhlkkqnrpfj`, región us-west-2), con variables en Vercel y
+   URLs de redirección. Oculto hasta tocar 5 veces "Versión" en Configuración.
+   Pendiente: SMTP propio (el de Supabase manda muy pocos correos por hora) y traducir la plantilla.
 2. ✅ Otro teléfono entra con el link y los datos bajan (probado en local y en producción).
    Dinámica de invitación (decidido):
    - Nadie más que el organizador usa email. El organizador lo da **una sola vez** (al subir su
@@ -187,11 +188,14 @@ Seguridad, respaldos y costos (decidido):
   también lo valida el servidor.
 - **Claves**: en el frontend solo la clave pública (anon); la `service_role` nunca sale del servidor.
 - **Abuso**: límites nativos de Supabase para sesiones anónimas; CAPTCHA (Turnstile) solo si aparece abuso.
-- **Respaldos**: `pg_dump` nocturno con GitHub Actions a un repo privado + la copia completa en cada
-  teléfono + export JSON siempre disponible.
+- ✅ **Respaldos**: `pg_dump` nocturno (solo datos) con GitHub Actions
+  (`.github/workflows/respaldo-nube.yml`), cifrado AES256 porque el repo es público, guardado 30
+  días como artifact. Secrets: `SUPABASE_DB_URL` (session pooler) y `BACKUP_PASSPHRASE`. Restaurar:
+  ver el comentario del workflow (probado: queda idéntico). Además, la copia completa en cada
+  teléfono y el export JSON.
 - **Costos**: free tier (500 MB, 50k MAU, 200 conexiones realtime). ~1 MB por grupo al año.
   El Pro (US$25/mes) exige tarjeta internacional (difícil desde Venezuela): aguantar en el free tier.
-- **Pausa del free tier** (1 semana sin uso): el mismo job nocturno mantiene el proyecto activo.
+- ✅ **Pausa del free tier** (1 semana sin uso): el mismo job nocturno llama a la API.
 
 ### [~] Página pública de solo lectura del grupo
 - Link/QR: tabla, última jornada, goleadores. Sin instalar ni registrarse.
