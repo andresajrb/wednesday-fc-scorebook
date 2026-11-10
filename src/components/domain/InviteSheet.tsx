@@ -181,7 +181,7 @@ export function InviteSheet({
       <ConfirmDialog
         open={removing !== null}
         title="Sacar del grupo"
-        description={`${removing?.displayName ?? 'Esta persona'} deja de ver y de anotar en ${name}. Lo que ya está en su teléfono no se borra.`}
+        description={`${removing?.displayName ?? 'Esta persona'} deja de ver y de anotar en ${name}, y la competición se borra de su teléfono.`}
         confirmLabel="Sacar"
         danger
         onCancel={() => setRemoving(null)}

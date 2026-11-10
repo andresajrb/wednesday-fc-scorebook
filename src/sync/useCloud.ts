@@ -19,6 +19,8 @@ export const ROLE_LABEL: Record<CloudRole, string> = {
 export interface CloudLink {
   linkedAt: string;
   role: CloudRole;
+  /** Cuenta con la que se entró al grupo: solo a esa la pueden sacar. */
+  userId?: ID;
   lastPushAt: string | null;
   /** Reloj del servidor del último registro bajado; null = falta la primera bajada. */
   pulledUpTo: string | null;
@@ -253,6 +255,8 @@ export const useCloud = create<CloudData & CloudActions>()(
         pendingInvite: s.pendingInvite,
         viewerLinks: s.viewerLinks,
         displayName: s.displayName,
+        // Un aviso como "Te sacaron de…" tiene que sobrevivir a cerrar la app.
+        notice: s.notice,
       }),
       // Los links de antes de las invitaciones eran todos del organizador.
       merge: (persisted, current) => {
@@ -312,13 +316,14 @@ function syncErrorMessage(message: string): string {
 function linkCompetition(competitionId: ID, role: CloudRole): void {
   useCloud.setState((s) => {
     const current = s.links[competitionId];
-    if (current?.role === role) return s;
+    const userId = s.userId ?? undefined;
+    if (current?.role === role && current.userId === userId) return s;
     return {
       links: {
         ...s.links,
         [competitionId]: current
-          ? { ...current, role }
-          : { linkedAt: new Date().toISOString(), role, lastPushAt: null, pulledUpTo: null },
+          ? { ...current, role, userId }
+          : { linkedAt: new Date().toISOString(), role, userId, lastPushAt: null, pulledUpTo: null },
       },
     };
   });
@@ -394,13 +399,36 @@ async function discoverMemberships(): Promise<void> {
   if (error) throw new Error(error.message);
   const roles = new Map((data ?? []).map((m) => [m.competition_id as ID, m.role as CloudRole]));
   for (const [competitionId, role] of roles) linkCompetition(competitionId, role);
+
+  const { links } = useCloud.getState();
+  const stale = Object.entries(links).filter(([id]) => !roles.has(id));
+  if (stale.length === 0) return;
+  // Lo sacaron: la competición se borra de este teléfono. Solo si es la misma cuenta que
+  // entró al grupo; con otra cuenta (cerró sesión y entró con otra) solo se desvincula.
+  const removed = stale
+    .filter(([, link]) => link.userId === userId && link.role !== 'organizer')
+    .map(([id]) => id);
+  const names = removed.map((id) => useStore.getState().state.competitions[id]?.name ?? 'un grupo');
+  for (const id of removed) useStore.getState().removeCompetitionLocal(id);
   useCloud.setState((s) => {
-    const stale = Object.keys(s.links).filter((id) => !roles.has(id));
-    if (stale.length === 0) return s;
-    const links = { ...s.links };
-    for (const id of stale) delete links[id];
-    return { links };
+    const nextLinks = { ...s.links };
+    const pushed = { ...s.pushed };
+    const viewerLinks = { ...s.viewerLinks };
+    for (const [id] of stale) {
+      delete nextLinks[id];
+      delete pushed[id];
+      delete viewerLinks[id];
+    }
+    return {
+      links: nextLinks,
+      pushed,
+      viewerLinks,
+      ...(names.length > 0
+        ? { notice: `Te sacaron de ${names.join(', ')}: se borró de este teléfono.` }
+        : {}),
+    };
   });
+  await rawStorage.set(PUSHED_KEY, useCloud.getState().pushed);
 }
 
 async function pushCompetition(competitionId: ID): Promise<void> {

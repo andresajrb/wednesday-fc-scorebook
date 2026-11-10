@@ -137,6 +137,8 @@ interface StoreActions {
   // Nube
   /** Aplica registros bajados de la nube. Devuelve los que quedaron (o ya estaban) así. */
   applyRemote(rows: RecordRow[], opts?: { force?: boolean }): RecordRow[];
+  /** Borra del teléfono una competición de la nube a la que ya no se pertenece (sin lápidas). */
+  removeCompetitionLocal(competitionId: ID): void;
   /** Quita registros que la nube rechazó y nunca llegaron a ella (sin lápida). */
   discardLocal(items: Array<{ table: SyncTable; id: ID }>): void;
 
@@ -1013,6 +1015,41 @@ export const useStore = create<Store>()(
         );
         return applied;
       },
+
+      removeCompetitionLocal: (competitionId) =>
+        withoutStamps(() =>
+          set((s) => {
+            const st = s.state;
+            if (!st.competitions[competitionId]) return s;
+            const teams = omit(st.teams, (t) => t.competitionId === competitionId);
+            const jornadas = omit(st.jornadas, (j) => j.competitionId === competitionId);
+            const players = omit(st.players, (p) => !teams[p.teamId]);
+            const matches = omit(st.matches, (m) => !jornadas[m.jornadaId]);
+            const goals = omit(st.goals, (g) => !matches[g.matchId]);
+            const competitions = { ...st.competitions };
+            delete competitions[competitionId];
+            const tombstones: AppState['tombstones'] = {};
+            for (const [id, t] of Object.entries(st.tombstones)) {
+              if (t.competitionId !== competitionId) tombstones[id] = t;
+            }
+            const activeId =
+              st.activeCompetitionId === competitionId
+                ? firstVisible(competitions)
+                : st.activeCompetitionId;
+            const next: AppState = {
+              ...st,
+              competitions,
+              activeCompetitionId: activeId,
+              teams,
+              players,
+              jornadas,
+              matches,
+              goals,
+              tombstones,
+            };
+            return { state: next, ui: makeInitialUI(next) };
+          })
+        ),
 
       discardLocal: (items) =>
         withoutStamps(() =>
