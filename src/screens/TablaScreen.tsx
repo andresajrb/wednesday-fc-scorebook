@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
-import { ArrowLeft, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
+import { useCallback, useMemo, useState } from 'react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Share2, Trophy } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { Header } from '@/components/primitives/Header';
 import { IconButton } from '@/components/primitives/IconButton';
 import { Avatar } from '@/components/primitives/Avatar';
 import { StandingsTable } from '@/components/domain/StandingsTable';
+import { ShareSheet, type ShareImageOption } from '@/components/domain/ShareSheet';
 import { PointsRaceChart } from '@/components/charts/PointsRaceChart';
 import { GoalsBarChart } from '@/components/charts/GoalsBarChart';
 import { useStore } from '@/store/useStore';
@@ -19,6 +20,9 @@ import {
   type Period,
   type PeriodKind,
 } from '@/store/season';
+import { buildPeriodText, getPeriodReport } from '@/lib/periodReport';
+import { canRenderRace, renderPeriodImage } from '@/lib/periodImage';
+import type { ShareTextVariant } from '@/lib/jornadaReport';
 import { todayISODate } from '@/lib/format';
 import { lightenForText, softColor } from '@/lib/colors';
 import { cn } from '@/lib/cn';
@@ -53,6 +57,30 @@ export function TablaScreen() {
   const hasLeader = !!leader && leader.pj > 0;
   const scorers = table.scorers.slice(0, MAX_SCORERS);
 
+  const [shareOpen, setShareOpen] = useState(false);
+  const report = useMemo(() => getPeriodReport(state, table, series, today), [state, table, series, today]);
+  const shareImages = useMemo<ShareImageOption[]>(
+    () => [
+      { id: 'tabla', label: 'Tabla', render: () => renderPeriodImage(report, 'table') },
+      {
+        id: 'goleadores',
+        label: 'Goleadores',
+        render: () => renderPeriodImage(report, 'scorers'),
+        unavailable: report.scorers.length === 0 ? 'todavía no hay goles asignados.' : undefined,
+      },
+      {
+        id: 'carrera',
+        label: 'Carrera por el título',
+        render: () => renderPeriodImage(report, 'race'),
+        defaultSelected: false,
+        unavailable: canRenderRace(report) ? undefined : 'se arma con 2 jornadas o más.',
+      },
+    ],
+    [report]
+  );
+  const shareText = useCallback((variant: ShareTextVariant) => buildPeriodText(report, variant), [report]);
+  const fileStem = kind === 'month' ? `tabla-${period.start.slice(0, 7)}` : `tabla-temporada-${period.start.slice(0, 4)}`;
+
   const switchKind = (next: PeriodKind) => {
     setKind(next);
     setOffset(0);
@@ -68,6 +96,13 @@ export function TablaScreen() {
         }
         title="Tabla"
         subtitle={competitionName}
+        right={
+          hasLeader ? (
+            <IconButton ariaLabel="Compartir tabla" onClick={() => setShareOpen(true)}>
+              <Share2 size={20} strokeWidth={1.75} />
+            </IconButton>
+          ) : undefined
+        }
       />
 
       <div className="px-4 py-4 space-y-4 flex-1">
@@ -232,6 +267,17 @@ export function TablaScreen() {
           </>
         )}
       </div>
+
+      {hasLeader && (
+        <ShareSheet
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          title={`Compartir ${report.title.toLowerCase()}`}
+          images={shareImages}
+          buildText={shareText}
+          fileStem={fileStem}
+        />
+      )}
     </ScreenShell>
   );
 }
