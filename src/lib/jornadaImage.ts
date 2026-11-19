@@ -1,115 +1,35 @@
 import type { JornadaReport } from '@/lib/jornadaReport';
 import { lightenForText } from '@/lib/colors';
-
-export const IMAGE_WIDTH = 1080;
-export const IMAGE_HEIGHT = 1350;
-
-const PAD = 72;
-const SANS = '"Geist Variable", system-ui, sans-serif';
-const MONO = '"Geist Mono Variable", ui-monospace, monospace';
-const BG = '#0a0a0a';
-const TEXT = '#fafafa';
-const TEXT_2 = '#a1a1a1';
-const TEXT_3 = '#525252';
-const ACCENT = '#bef264';
-const MEDAL = ['#facc15', '#d4d4d8', '#d97706'];
-
-const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><circle cx="256" cy="256" r="226" fill="none" stroke="${ACCENT}" stroke-width="26" stroke-dasharray="206.65 30" transform="rotate(-26.2 256 256)"/><g transform="translate(256,256) scale(0.76) translate(-283.9,-256)"><g fill="none" stroke="${ACCENT}" stroke-width="42.1"><path d="M95 181 L128 315 L158 225 L188 315 L221 181"/><path d="M269 331 L269 181 L333 181"/><path d="M269 256 L321 256"/><path d="M472.85 303.49 A 62 62 0 1 1 472.85 208.51"/></g></g></svg>`;
-
-function rgba(hex: string, alpha: number): string {
-  const h = hex.replace('#', '');
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
-function loadImage(src: string): Promise<HTMLImageElement | null> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src = src;
-  });
-}
-
-async function ensureFonts(): Promise<void> {
-  if (typeof document === 'undefined' || !document.fonts) return;
-  try {
-    await Promise.all([
-      document.fonts.load(`700 40px ${SANS}`),
-      document.fonts.load(`500 40px ${SANS}`),
-      document.fonts.load(`700 40px ${MONO}`),
-    ]);
-  } catch {
-    // Con la fuente del sistema la imagen sale igual.
-  }
-}
-
-/** Achica la fuente hasta que el texto entre en el ancho disponible. */
-function fitFont(ctx: CanvasRenderingContext2D, text: string, weight: number, max: number, min: number, width: number): number {
-  let size = max;
-  while (size > min) {
-    ctx.font = `${weight} ${size}px ${SANS}`;
-    if (ctx.measureText(text).width <= width) break;
-    size -= 4;
-  }
-  return size;
-}
-
-function ellipsize(ctx: CanvasRenderingContext2D, text: string, width: number): string {
-  if (ctx.measureText(text).width <= width) return text;
-  let out = text;
-  while (out.length > 1 && ctx.measureText(`${out}…`).width > width) out = out.slice(0, -1);
-  return `${out}…`;
-}
-
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
+import {
+  ACCENT,
+  BG,
+  IMAGE_HEIGHT,
+  IMAGE_WIDTH,
+  MEDAL,
+  MONO,
+  PAD,
+  SANS,
+  TEXT,
+  TEXT_2,
+  TEXT_3,
+  canvasToBlob,
+  createImageCanvas,
+  drawBrandHeader,
+  ellipsize,
+  fitFont,
+  rgba,
+  roundRect,
+} from '@/lib/canvasKit';
 
 /** Imagen vertical (1080×1350, formato de WhatsApp/Instagram) con el resumen de la jornada. */
 export async function renderJornadaImage(report: JornadaReport): Promise<Blob> {
-  await ensureFonts();
-  const canvas = document.createElement('canvas');
-  canvas.width = IMAGE_WIDTH;
-  canvas.height = IMAGE_HEIGHT;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Canvas no disponible');
-
   const winnerColor = report.winner?.team.color ?? ACCENT;
   const innerW = IMAGE_WIDTH - PAD * 2;
+  const { canvas, ctx } = await createImageCanvas(winnerColor);
 
-  ctx.fillStyle = BG;
-  ctx.fillRect(0, 0, IMAGE_WIDTH, IMAGE_HEIGHT);
-  const glow = ctx.createLinearGradient(0, 0, IMAGE_WIDTH * 0.4, 760);
-  glow.addColorStop(0, rgba(winnerColor, 0.38));
-  glow.addColorStop(1, rgba(winnerColor, 0));
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, IMAGE_WIDTH, IMAGE_HEIGHT);
-
-  // Cabecera
-  const logo = await loadImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(LOGO_SVG)}`);
-  let y = PAD;
-  if (logo) ctx.drawImage(logo, PAD, y, 64, 64);
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = ACCENT;
-  ctx.font = `700 30px ${SANS}`;
-  ctx.fillText('MIÉRCOLES DE FÚTBOL', PAD + (logo ? 84 : 0), y + 32);
-  ctx.textAlign = 'right';
-  ctx.fillStyle = TEXT_2;
-  ctx.font = `500 32px ${SANS}`;
-  ctx.fillText(report.dateLabel, IMAGE_WIDTH - PAD, y + 32);
-  ctx.textAlign = 'left';
-
+  await drawBrandHeader(ctx, report.dateLabel);
   // Equipo del día
-  y = 220;
+  let y = 220;
   ctx.textBaseline = 'alphabetic';
   if (report.winner) {
     const nameColor = lightenForText(report.winner.team.color);
@@ -244,7 +164,5 @@ export async function renderJornadaImage(report: JornadaReport): Promise<Blob> {
     ctx.textAlign = 'left';
   }
 
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('No se pudo generar la imagen'))), 'image/png');
-  });
+  return canvasToBlob(canvas);
 }

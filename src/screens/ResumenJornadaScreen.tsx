@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ArrowLeft, Share2, Trophy, ArrowRight } from 'lucide-react';
 import { ScreenShell } from '@/components/primitives/ScreenShell';
 import { IconButton } from '@/components/primitives/IconButton';
@@ -6,8 +6,9 @@ import { Header } from '@/components/primitives/Header';
 import { Button } from '@/components/primitives/Button';
 import { Avatar } from '@/components/primitives/Avatar';
 import { StandingsTable } from '@/components/domain/StandingsTable';
-import { ShareSheet } from '@/components/domain/ShareSheet';
-import { getJornadaReport } from '@/lib/jornadaReport';
+import { ShareSheet, type ShareImageOption } from '@/components/domain/ShareSheet';
+import { buildShareText, getJornadaReport, type ShareTextVariant } from '@/lib/jornadaReport';
+import { renderJornadaImage } from '@/lib/jornadaImage';
 import { useStore } from '@/store/useStore';
 import { useScopedState } from '@/store/useScopedState';
 import {
@@ -32,6 +33,14 @@ export function ResumenJornadaScreen({ jornadaId }: ResumenJornadaScreenProps) {
   const jornada = state.jornadas[jornadaId];
   const report = useMemo(() => getJornadaReport(state, jornadaId), [state, jornadaId]);
   const [shareOpen, setShareOpen] = useState(false);
+  const shareImages = useMemo<ShareImageOption[]>(
+    () => (report ? [{ id: 'resumen', label: 'Resumen', render: () => renderJornadaImage(report) }] : []),
+    [report]
+  );
+  const shareText = useCallback(
+    (variant: ShareTextVariant) => (report ? buildShareText(report, variant) : ''),
+    [report]
+  );
   if (!jornada || !report) {
     return (
       <ScreenShell>
@@ -270,7 +279,9 @@ export function ResumenJornadaScreen({ jornadaId }: ResumenJornadaScreenProps) {
       <ShareSheet
         open={shareOpen}
         onClose={() => setShareOpen(false)}
-        report={report}
+        title="Compartir resumen"
+        images={shareImages}
+        buildText={shareText}
         fileStem={`miercoles-${jornada.date}`}
       />
     </ScreenShell>

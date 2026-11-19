@@ -2,17 +2,34 @@ import { useEffect, useMemo, useState } from 'react';
 import { Check, Download, Image as ImageIcon, MessageSquareText, Share2 } from 'lucide-react';
 import { BottomSheet } from '@/components/primitives/BottomSheet';
 import { Button } from '@/components/primitives/Button';
-import { buildShareText, type JornadaReport, type ShareTextVariant } from '@/lib/jornadaReport';
-import { renderJornadaImage } from '@/lib/jornadaImage';
+import type { ShareTextVariant } from '@/lib/jornadaReport';
 import { cn } from '@/lib/cn';
 
 type ShareMode = 'both' | 'image' | 'text';
 
+export interface ShareImageOption {
+  id: string;
+  label: string;
+  render: () => Promise<Blob>;
+  /** Marcada al abrir la hoja. */
+  defaultSelected?: boolean;
+  /** Por qué no se puede generar; la opción queda deshabilitada. */
+  unavailable?: string;
+}
+
 interface ShareSheetProps {
   open: boolean;
   onClose: () => void;
-  report: JornadaReport;
+  title: string;
+  /** Con más de una, se elige cuáles mandar; se comparten juntas, en este orden. */
+  images: ShareImageOption[];
+  buildText: (variant: ShareTextVariant) => string;
   fileStem: string;
+}
+
+interface RenderedImage {
+  blob: Blob;
+  url: string;
 }
 
 type ShareNavigator = Navigator & {
@@ -40,11 +57,16 @@ function downloadBlob(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function ShareSheet({ open, onClose, report, fileStem }: ShareSheetProps) {
+function downloadAll(files: File[]): void {
+  // Varias descargas seguidas: algunos navegadores bloquean las que salen juntas.
+  files.forEach((file, i) => setTimeout(() => downloadBlob(file, file.name), i * 400));
+}
+
+export function ShareSheet({ open, onClose, title, images, buildText, fileStem }: ShareSheetProps) {
   const [mode, setMode] = useState<ShareMode>('both');
   const [variant, setVariant] = useState<ShareTextVariant>('short');
-  const [image, setImage] = useState<Blob | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [rendered, setRendered] = useState<Record<string, RenderedImage>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -56,30 +78,47 @@ export function ShareSheet({ open, onClose, report, fileStem }: ShareSheetProps)
   useEffect(() => {
     if (!open) return;
     setNotice(null);
+    setSelected(images.filter((i) => !i.unavailable && (i.defaultSelected ?? true)).map((i) => i.id));
     let cancelled = false;
-    let url: string | null = null;
-    void renderJornadaImage(report)
-      .then((blob) => {
-        if (cancelled) return;
-        url = URL.createObjectURL(blob);
-        setImage(blob);
-        setImageUrl(url);
-      })
-      .catch(() => {
-        if (!cancelled) setNotice('No se pudo generar la imagen. Puedes compartir solo el texto.');
-      });
+    const urls: string[] = [];
+    for (const option of images) {
+      if (option.unavailable) continue;
+      void option
+        .render()
+        .then((blob) => {
+          if (cancelled) return;
+          const url = URL.createObjectURL(blob);
+          urls.push(url);
+          setRendered((prev) => ({ ...prev, [option.id]: { blob, url } }));
+        })
+        .catch(() => {
+          if (!cancelled) setNotice('No se pudo generar alguna imagen. Puedes compartir solo el texto.');
+        });
+    }
     return () => {
       cancelled = true;
-      if (url) URL.revokeObjectURL(url);
-      setImage(null);
-      setImageUrl(null);
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      setRendered({});
     };
-  }, [open, report]);
+  }, [open, images]);
 
-  const text = useMemo(() => buildShareText(report, variant), [report, variant]);
+  const text = useMemo(() => buildText(variant), [buildText, variant]);
   const withImage = mode !== 'text';
   const withText = mode !== 'image';
-  const fileName = `${fileStem}.png`;
+  const multiple = images.length > 1;
+  const chosen = images.filter((i) => selected.includes(i.id) && !i.unavailable);
+  const ready = chosen.length > 0 && chosen.every((i) => rendered[i.id]);
+  const files = ready
+    ? chosen.map(
+        (i) =>
+          new File([rendered[i.id].blob], multiple ? `${fileStem}-${i.id}.png` : `${fileStem}.png`, {
+            type: 'image/png',
+          })
+      )
+    : [];
+
+  const toggle = (id: string) =>
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const onShare = async () => {
     setBusy(true);
@@ -97,11 +136,10 @@ export function ShareSheet({ open, onClose, report, fileStem }: ShareSheetProps)
         return;
       }
 
-      if (!image) return;
-      const file = new File([image], fileName, { type: 'image/png' });
+      if (files.length === 0) return;
       const canShareFile =
         typeof nav.share === 'function' &&
-        (typeof nav.canShare !== 'function' || nav.canShare({ files: [file] }));
+        (typeof nav.canShare !== 'function' || nav.canShare({ files }));
 
       // iOS a veces descarta el texto cuando se comparten archivos: queda copiado
       // para pegarlo como pie de foto. No se espera a la copia antes de `share`:
@@ -109,17 +147,19 @@ export function ShareSheet({ open, onClose, report, fileStem }: ShareSheetProps)
       const copying = withText ? copyText(text) : Promise.resolve(false);
 
       if (canShareFile) {
-        const sharing = nav.share(withText ? { files: [file], text } : { files: [file] });
+        const sharing = nav.share(withText ? { files, text } : { files });
         const copied = await copying;
         await sharing;
         if (copied) setNotice('Texto copiado: pégalo como pie de foto si no aparece.');
       } else {
         const copied = await copying;
-        downloadBlob(image, fileName);
+        downloadAll(files);
+        const what = files.length === 1 ? 'Imagen descargada' : 'Imágenes descargadas';
+        const attach = files.length === 1 ? 'Adjúntala' : 'Adjúntalas';
         setNotice(
           copied
-            ? 'Imagen descargada y texto copiado. Adjúntala en WhatsApp y pega el texto.'
-            : 'Imagen descargada. Adjúntala en WhatsApp.'
+            ? `${what} y texto copiado. ${attach} en WhatsApp y pega el texto.`
+            : `${what}. ${attach} en WhatsApp.`
         );
       }
     } catch (err) {
@@ -133,7 +173,7 @@ export function ShareSheet({ open, onClose, report, fileStem }: ShareSheetProps)
   };
 
   return (
-    <BottomSheet open={open} onClose={onClose} title="Compartir resumen">
+    <BottomSheet open={open} onClose={onClose} title={title}>
       <div className="space-y-4 pb-2">
         <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Qué compartir">
           <ModeOption
@@ -157,20 +197,71 @@ export function ShareSheet({ open, onClose, report, fileStem }: ShareSheetProps)
           />
         </div>
 
-        {withImage && (
-          <div className="rounded-card overflow-hidden border border-border bg-bg-elev aspect-[4/5] max-h-[32vh] mx-auto">
-            {imageUrl ? (
-              <img
-                src={imageUrl}
-                alt="Vista previa del resumen"
-                className="w-full h-full object-contain"
-                data-testid="share-image"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-caption text-text-3">
-                Generando imagen…
-              </div>
+        {withImage && multiple && (
+          <div>
+            <span className="text-caption text-text-2 uppercase tracking-wide">Imágenes</span>
+            <div className="flex flex-wrap gap-2 mt-2" role="group" aria-label="Imágenes a compartir">
+              {images.map((option) => {
+                const on = selected.includes(option.id) && !option.unavailable;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    aria-pressed={on}
+                    disabled={!!option.unavailable}
+                    onClick={() => toggle(option.id)}
+                    className={cn(
+                      'h-9 px-3 rounded-btn border inline-flex items-center gap-1.5 text-caption font-semibold',
+                      on ? 'border-accent bg-accent/10 text-text' : 'border-border bg-bg-elev2 text-text-2',
+                      option.unavailable && 'opacity-40'
+                    )}
+                  >
+                    {on && <Check size={14} strokeWidth={2.25} className="text-accent" />}
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+            {images
+              .filter((i) => i.unavailable)
+              .map((i) => (
+                <p key={i.id} className="text-caption text-text-3 mt-1.5">
+                  {i.label}: {i.unavailable}
+                </p>
+              ))}
+          </div>
+        )}
+
+        {withImage && chosen.length === 0 && (
+          <p className="text-caption text-text-2 text-center py-6">Elige al menos una imagen.</p>
+        )}
+
+        {withImage && chosen.length > 0 && (
+          <div
+            className={cn(
+              'flex gap-2',
+              chosen.length > 1 ? 'overflow-x-auto snap-x snap-mandatory -mx-1 px-1 pb-1' : 'justify-center'
             )}
+          >
+            {chosen.map((option) => (
+              <div
+                key={option.id}
+                className="rounded-card overflow-hidden border border-border bg-bg-elev aspect-[4/5] h-[32vh] flex-shrink-0 snap-center"
+              >
+                {rendered[option.id] ? (
+                  <img
+                    src={rendered[option.id].url}
+                    alt={`Vista previa: ${option.label}`}
+                    className="w-full h-full object-contain"
+                    data-testid="share-image"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-caption text-text-3">
+                    Generando imagen…
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
 
@@ -215,21 +306,21 @@ export function ShareSheet({ open, onClose, report, fileStem }: ShareSheetProps)
           <Button
             size="xl"
             fullWidth
-            disabled={busy || (withImage && !image)}
+            disabled={busy || (withImage && !ready)}
             leading={<Share2 size={18} strokeWidth={1.75} />}
             onClick={onShare}
           >
             Compartir
           </Button>
-          {withImage && image && (
+          {withImage && ready && (
             <Button
               size="md"
               variant="ghost"
               fullWidth
               leading={<Download size={16} strokeWidth={1.75} />}
-              onClick={() => downloadBlob(image, fileName)}
+              onClick={() => downloadAll(files)}
             >
-              Descargar imagen
+              {files.length === 1 ? 'Descargar imagen' : `Descargar ${files.length} imágenes`}
             </Button>
           )}
         </div>

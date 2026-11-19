@@ -135,17 +135,17 @@ function getCuriosities(
   return out.slice(0, MAX_CURIOSITIES);
 }
 
-const MEDALS = ['🥇', '🥈', '🥉'];
+export const MEDALS = ['🥇', '🥈', '🥉'];
 
-function plural(n: number, one: string, many: string): string {
+export function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-function pts(n: number): string {
+export function pts(n: number): string {
   return `${n} ${n === 1 ? 'pt' : 'pts'}`;
 }
 
-function teamTag(team: Team): string {
+export function teamTag(team: Team): string {
   return `${colorEmoji(team.color)} ${team.name}`;
 }
 
