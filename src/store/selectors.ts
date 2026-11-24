@@ -278,7 +278,9 @@ export function getJornadaQueue(state: AppState, jornadaId: ID): JornadaQueue {
     };
 
     for (const m of window) {
-      for (const t of [m.teamAId, m.teamBId]) if (!staying.includes(t)) take(t);
+      // El que venía ganando de antes de la ventana también sale de `unseen`: ya se sabe
+      // dónde está, y si pierde no puede quedar a la vez en `unseen` y en `queue`.
+      for (const t of [m.teamAId, m.teamBId]) take(t);
       if (m.result === 'A') {
         staying = [m.teamAId];
         queue.push(m.teamBId);
